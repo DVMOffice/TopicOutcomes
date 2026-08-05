@@ -1,26 +1,26 @@
-# Guía paso a paso: conectar esta app a Firebase
+# Step-by-step guide: connecting this app to Firebase
 
-Todo se hace desde el navegador — no necesitas Node, terminal, ni claves
-de servicio. Solo la consola web de Firebase.
-
----
-
-## Paso 1 — Crear el proyecto de Firebase
-
-1. Ve a https://console.firebase.google.com/
-2. Inicia sesión con tu cuenta de Google.
-3. Clic en **"Agregar proyecto" / "Add project"**.
-4. Ponle un nombre, ej. `learning-outcomes-ucvm`.
-5. Puedes desactivar Google Analytics. Clic en **Crear proyecto** y espera.
+Everything is done from the browser — no Node, no terminal, no service
+account keys. Just the Firebase web console.
 
 ---
 
-## Paso 2 — Registrar la app web
+## Step 1 — Create the Firebase project
 
-1. En el panel del proyecto, clic en el ícono **`</>`** (Web).
-2. Apodo, ej. `learning-outcomes-web`.
-3. **NO marques** "Firebase Hosting" todavía.
-4. Clic en **Registrar app**. Verás un bloque como este:
+1. Go to https://console.firebase.google.com/
+2. Sign in with your Google account.
+3. Click **"Add project"**.
+4. Give it a name, e.g. `learning-outcomes-ucvm`.
+5. You can turn off Google Analytics. Click **Create project** and wait.
+
+---
+
+## Step 2 — Register the web app
+
+1. In the project panel, click the **`</>`** icon (Web).
+2. Nickname, e.g. `learning-outcomes-web`.
+3. **Do NOT check** "Set up Firebase Hosting" yet.
+4. Click **Register app**. You'll see a block like this:
 
 ```js
 const firebaseConfig = {
@@ -33,101 +33,100 @@ const firebaseConfig = {
 };
 ```
 
-5. **Copia ese objeto completo** y pégalo en tu archivo **`firebaseConfig.js`** (raíz del proyecto), reemplazando los valores `"REEMPLAZA_..."`.
-6. Clic en **"Continuar a la consola"**.
+5. **Copy that whole object** and paste it into your **`firebaseConfig.js`** file (project root), replacing the `"REPLACE_..."` placeholder values.
+6. Click **"Continue to console"**.
 
 ---
 
-## Paso 3 — Activar Authentication
+## Step 3 — Enable Authentication
 
-1. Menú lateral: **Build > Authentication** → **Comenzar**.
-2. Pestaña **Sign-in method** → activa **"Correo electrónico/contraseña"**, y dentro de esa misma tarjeta activa **"Vínculo de correo electrónico (sin contraseña)"**.
-3. Activa también **"Anónimo"** (para el acceso de invitados).
-4. Pestaña **Settings > Authorized domains**: confirma `localhost`, y agrega tu dominio real cuando publiques (GitHub Pages o Firebase Hosting).
-
----
-
-## Paso 4 — Crear Firestore
-
-1. Menú lateral: **Build > Firestore Database** → **Crear base de datos**.
-2. Elige la ubicación más cercana a tus usuarios.
-3. **"Iniciar en modo de producción"** → **Habilitar**.
-
-### Crear los códigos de invitado
-
-1. **"+ Iniciar colección"** → ID: `accessCodes`.
-2. ID del documento: `Year 1` → campo `code` (string) → tu código, ej. `UCVM-Y1-2026`.
-3. Repite para `Year 2` y `Year 3`.
-
-(`instructors` y `topics` se crean solos cuando importes tus Excel en el Paso 6.)
+1. Left menu: **Build > Authentication** → **Get started**.
+2. **Sign-in method** tab → enable **"Email/Password"**, and within that same card also enable **"Email link (passwordless sign-in)"**.
+3. Also enable **"Anonymous"** (used for guest access).
+4. **Settings > Authorized domains** tab: confirm `localhost` is listed, and add your real domain once you publish (GitHub Pages or Firebase Hosting).
 
 ---
 
-## Paso 5 — Publicar las reglas de seguridad
+## Step 4 — Create Firestore
 
-1. En Firestore, pestaña **Reglas / Rules**.
-2. Borra el contenido y pega el archivo **`firestore.rules`** (raíz del proyecto).
-3. Clic en **Publicar**.
+1. Left menu: **Build > Firestore Database** → **Create database**.
+2. Choose the location closest to your users.
+3. **"Start in production mode"** → **Enable**.
 
-Estas reglas no requieren claves de administrador: cualquier instructor
-con correo real (no invitado) puede leer/escribir instructores y temas;
-los invitados solo pueden agregar/editar resultados dentro de un tema que
-ya exista. Si más adelante quieres que **solo tú** puedas importar datos,
-abre `firestore.rules`, descomenta `isAdminEmail()` y agrega tu correo ahí
-— son 3 líneas, sin backend.
+### Create the guest access codes
+
+1. **"+ Start collection"** → ID: `accessCodes`.
+2. Document ID: `Year 1` → field `code` (string) → your code, e.g. `UCVM-Y1`.
+3. Repeat for `Year 2` and `Year 3`.
+
+(`instructors` and `topics` are created automatically once you import your Excel files in Step 6.)
 
 ---
 
-## Paso 6 — Probar la app y cargar tus datos
+## Step 5 — Publish the security rules
 
-Como la app usa módulos ES6, no abras `index.html` con doble clic — sirve
-un servidor local simple. Si tienes Python instalado:
+1. In Firestore, go to the **Rules** tab.
+2. Delete the existing content and paste the **`firestore.rules`** file (project root).
+3. Click **Publish**.
+
+These rules don't require admin custom claims: any instructor with a real
+email (not a guest) can read/write instructors and topics; guests can only
+add/edit outcomes within an existing topic. If later you want only you to
+be able to import data, open `firestore.rules`, uncomment `isAdminEmail()`
+and add your email — 3 lines, no backend needed.
+
+---
+
+## Step 6 — Test the app and load your data
+
+Since the app uses ES6 modules, don't open `index.html` by double-clicking
+— serve it with a simple local server. If you have Python installed:
 
 ```bash
 python3 -m http.server 5500
 ```
 
-Abre `http://localhost:5500` en tu navegador.
+Open `http://localhost:5500` in your browser.
 
-1. **Inicia sesión** con un correo real que exista en tu lista de instructores.
-2. Ve a **`admin.html`**.
-3. En la sección **"Importar datos desde Excel"**, sube tus dos archivos:
+1. **Sign in** with a real email that exists in your instructor list.
+2. Go to **`admin.html`**.
+3. In the **"Import data from Excel"** section, upload your two files:
    - `Topicinstructor_master_list.xlsx`
    - `Instructorsemails_list.xlsx`
-4. Clic en **"Importar y subir a Firestore"**. Verás el progreso en pantalla
-   (cuántos instructores, cuántos temas, cuántas filas se excluyeron por
-   ser labs/exámenes/almuerzos/feriados).
+4. Click **"Import and upload to Firestore"**. You'll see progress on
+   screen (how many instructors, how many topics, how many rows were
+   excluded for being labs/exams/lunch/holidays).
 
-Eso es todo — no hay script aparte que correr.
+That's it — there's no separate script to run.
 
 ---
 
-## Paso 7 — Publicar (opcional)
+## Step 7 — Publish (optional)
 
-### Opción A: Firebase Hosting
+### Option A: Firebase Hosting
 ```bash
 npm install -g firebase-tools
 firebase login
-firebase init hosting   # elige "." como directorio público
+firebase init hosting   # choose "." as the public directory
 firebase deploy
 ```
 
-### Opción B: GitHub Pages
-1. Activa GitHub Pages en tu repositorio, apuntando a la rama `main` / raíz.
-2. En Firebase, agrega `tu-usuario.github.io` a **Authorized domains**.
+### Option B: GitHub Pages
+1. Enable GitHub Pages on your repository, pointing to the `main` branch / root.
+2. In Firebase, add `your-username.github.io` to **Authorized domains**.
 
 ---
 
-## Resumen — dónde está cada cosa
+## Summary — where everything lives
 
-| Necesitas | Archivo |
+| You need | File |
 |---|---|
-| Config de Firebase | `firebaseConfig.js` |
-| Reglas de seguridad | `firestore.rules` |
-| Login / identidad (lógica compartida) | `app.js` |
-| Temas, outcomes y exportación (lógica compartida) | `dataEngine.js` |
-| Importar tus Excel (lógica compartida) | `importEngine.js` |
-| Pantalla de login | `index.html` |
-| Panel instructor | `dashboard.html` |
-| Colaboración por tema | `topic.html` |
-| Panel admin, import y export | `admin.html` |
+| Firebase config | `firebaseConfig.js` |
+| Security rules | `firestore.rules` |
+| Login / identity (shared logic) | `app.js` |
+| Topics, outcomes, and export (shared logic) | `dataEngine.js` |
+| Import your Excel files (shared logic) | `importEngine.js` |
+| Login screen | `index.html` |
+| Instructor dashboard | `dashboard.html` |
+| Topic collaboration | `topic.html` |
+| Admin panel, import and export | `admin.html` |
