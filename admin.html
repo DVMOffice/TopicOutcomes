@@ -1,67 +1,67 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Panel de Administrador — Learning Outcomes</title>
+<title>UCVM Learning Outcomes — Admin</title>
 <link rel="stylesheet" href="style.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
   <div class="topbar">
-    <h1>Learning Outcomes — Admin</h1>
-    <a href="dashboard.html" style="color:#fff;">Vista instructor</a>
+    <h1>UCVM Learning Outcomes — Admin</h1>
+    <a href="dashboard.html" style="color:#fff;">Instructor view</a>
   </div>
 
   <div class="main-content">
     <div class="card mb-4">
-      <h3>Importar datos desde Excel</h3>
-      <p class="text-muted">Sube los dos archivos originales. Todo se limpia y se sube a Firestore directo desde el navegador — sin instalar nada.</p>
+      <h3>Import data from Excel</h3>
+      <p class="text-muted">Upload the two original files. Everything is cleaned up and uploaded to Firestore directly from the browser — no installation needed.</p>
       <div class="form-group mt-2">
-        <label for="file-master">Lista maestra (Topicinstructor_master_list.xlsx)</label>
+        <label for="file-master">Master list (Topicinstructor_master_list.xlsx)</label>
         <input type="file" id="file-master" accept=".xlsx" />
       </div>
       <div class="form-group">
-        <label for="file-emails">Lista de correos (Instructorsemails_list.xlsx)</label>
+        <label for="file-emails">Email list (Instructorsemails_list.xlsx)</label>
         <input type="file" id="file-emails" accept=".xlsx" />
       </div>
-      <button class="btn btn-primary" id="btn-import">Importar y subir a Firestore</button>
+      <button class="btn btn-primary" id="btn-import">Import and upload to Firestore</button>
       <p class="text-muted mt-2" id="import-status"></p>
     </div>
 
     <div class="card mb-4">
-      <h2 id="overall-title">Progreso general</h2>
+      <h2 id="overall-title">Overall progress</h2>
       <div class="progress-track"><div class="progress-fill" id="overall-fill" style="width:0%"></div></div>
       <p class="text-muted mt-2" id="overall-summary"></p>
     </div>
 
     <div class="card-grid mb-4">
-      <div class="card"><h3 id="stat-total">0</h3><span class="text-muted">Temas totales</span></div>
-      <div class="card"><h3 id="stat-complete">0</h3><span class="text-muted">Temas completos</span></div>
-      <div class="card"><h3 id="stat-progress">0</h3><span class="text-muted">En progreso</span></div>
-      <div class="card"><h3 id="stat-missing">0</h3><span class="text-muted">Sin iniciar</span></div>
+      <div class="card"><h3 id="stat-total">0</h3><span class="text-muted">Total topics</span></div>
+      <div class="card"><h3 id="stat-complete">0</h3><span class="text-muted">Completed topics</span></div>
+      <div class="card"><h3 id="stat-progress">0</h3><span class="text-muted">In progress</span></div>
+      <div class="card"><h3 id="stat-missing">0</h3><span class="text-muted">Not started</span></div>
     </div>
 
     <div class="card mb-4">
-      <h3>Progreso por instructor</h3>
+      <h3>Progress by instructor</h3>
       <div id="instructor-progress"></div>
     </div>
 
     <div class="card mb-4">
-      <h3>Filtros de exportación</h3>
+      <h3>Export filters</h3>
       <div class="filters-bar">
-        <select id="filter-year"><option value="">Todos los años</option></select>
-        <select id="filter-course"><option value="">Todos los cursos</option></select>
-        <select id="filter-instructor"><option value="">Todos los instructores</option></select>
+        <select id="filter-year"><option value="">All years</option></select>
+        <select id="filter-course"><option value="">All courses</option></select>
+        <select id="filter-instructor"><option value="">All instructors</option></select>
         <select id="filter-status">
-          <option value="">Todos los estados</option>
-          <option value="not_started">Sin iniciar</option>
-          <option value="in_progress">En progreso</option>
-          <option value="complete">Completo</option>
+          <option value="">All statuses</option>
+          <option value="not_started">Not started</option>
+          <option value="in_progress">In progress</option>
+          <option value="complete">Complete</option>
         </select>
       </div>
       <div class="flex gap-2">
-        <button class="btn btn-primary" id="btn-export-csv">⬇ Exportar CSV</button>
+        <button class="btn btn-primary" id="btn-export-csv">⬇ Export CSV</button>
         <button class="btn btn-secondary" id="btn-export-excel">⬇ Excel</button>
         <button class="btn btn-secondary" id="btn-export-json">⬇ JSON</button>
       </div>
@@ -69,15 +69,15 @@
     </div>
 
     <div class="card">
-      <h3>Vista previa (primeras 20 filas)</h3>
+      <h3>Preview (first 20 rows)</h3>
       <div style="overflow-x:auto;">
         <table class="data-table" id="preview-table"></table>
       </div>
     </div>
   </div>
 
-  <!-- Lógica de esta página: estadísticas, filtros y exportación.
-       Instructores -> app.js. Temas/filtros/exportación -> dataEngine.js -->
+  <!-- Logic for this page: stats, filters, and export.
+       Instructors -> app.js. Topics/filters/export -> dataEngine.js -->
   <script type="module">
     import { getAllInstructors } from "./app.js";
     import { getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible } from "./dataEngine.js";
@@ -91,7 +91,7 @@
       const masterFile = $("file-master").files[0];
       const emailsFile = $("file-emails").files[0];
       if (!masterFile || !emailsFile) {
-        $("import-status").textContent = "Selecciona los dos archivos primero.";
+        $("import-status").textContent = "Select both files first.";
         return;
       }
       $("btn-import").disabled = true;
@@ -100,9 +100,9 @@
           $("import-status").textContent = msg;
         });
         $("import-status").textContent =
-          `Listo: ${result.totalInstructors} instructores (${result.instructorsWithoutEmail} sin correo), ` +
-          `${result.totalTopics} temas importados, ${result.excludedRows} filas excluidas (labs/exámenes/etc.)`;
-        // Refresca el panel con los datos recién subidos
+          `Done: ${result.totalInstructors} instructors (${result.instructorsWithoutEmail} without email), ` +
+          `${result.totalTopics} topics imported, ${result.excludedRows} rows excluded (labs/exams/etc.)`;
+        // Refresh the dashboard with the newly uploaded data
         allTopics = await getAllTopics();
         allInstructors = await getAllInstructors();
         renderStats();
@@ -160,9 +160,9 @@
     function populateFilterOptions() {
       const years = [...new Set(allTopics.map((t) => t.academicYear))].sort();
       const courses = [...new Set(allTopics.map((t) => t.course))].sort();
-      $("filter-year").innerHTML = `<option value="">Todos los años</option>` + years.map((y) => `<option value="${y}">${y}</option>`).join("");
-      $("filter-course").innerHTML = `<option value="">Todos los cursos</option>` + courses.map((c) => `<option value="${c}">${c}</option>`).join("");
-      $("filter-instructor").innerHTML = `<option value="">Todos los instructores</option>` + allInstructors.map((i) => `<option value="${i.instructorId}">${i.name}</option>`).join("");
+      $("filter-year").innerHTML = `<option value="">All years</option>` + years.map((y) => `<option value="${y}">${y}</option>`).join("");
+      $("filter-course").innerHTML = `<option value="">All courses</option>` + courses.map((c) => `<option value="${c}">${c}</option>`).join("");
+      $("filter-instructor").innerHTML = `<option value="">All instructors</option>` + allInstructors.map((i) => `<option value="${i.instructorId}">${i.name}</option>`).join("");
     }
 
     function currentFilters() {
@@ -175,9 +175,9 @@
     }
 
     function renderPreview(rows) {
-      $("export-row-count").textContent = `${rows.length} filas listas para exportar (formato Power Query, una fila por resultado).`;
+      $("export-row-count").textContent = `${rows.length} rows ready to export (Power Query format, one row per outcome).`;
       const table = $("preview-table");
-      if (rows.length === 0) { table.innerHTML = "<tr><td>Sin datos con estos filtros.</td></tr>"; return; }
+      if (rows.length === 0) { table.innerHTML = "<tr><td>No data matches these filters.</td></tr>"; return; }
       const cols = Object.keys(rows[0]);
       table.innerHTML = `<tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr>` + rows.slice(0, 20).map((r) => `<tr>${cols.map((c) => `<td>${r[c]}</td>`).join("")}</tr>`).join("");
     }
