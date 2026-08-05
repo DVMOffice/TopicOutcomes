@@ -12,7 +12,7 @@ backend, no Node, no separate scripts.
 | `firebaseConfig.js` | Connection to your Firebase project | Only once, when connecting your project |
 | `app.js` | Everything about identity: email login, guest login, session, instructor lookups | If something about login breaks |
 | `dataEngine.js` | Everything about data: topics, learning outcomes, progress, activity, and export | If something about outcomes or export breaks |
-| `importEngine.js` | Reads your 2 Excel files directly in the browser and uploads them to Firestore | If you need to adjust which rows get excluded during import |
+| `importEngine.js` | Reads your 2 Excel files in the browser, lets you review/fix unmatched instructor names, then uploads to Firestore | If you need to adjust which rows get excluded, or how name-matching works |
 | `index.html` | Login (email + guest), logic included inline | Login design/flow |
 | `dashboard.html` | Instructor dashboard | Instructor dashboard |
 | `topic.html` | Real-time topic collaboration | How outcomes are added/edited |
@@ -73,18 +73,21 @@ importing.
 
 ## Security note
 
-Importing/managing the instructor roster and topics (bulk create/delete)
-is restricted to two admin emails, checked server-side by Firestore
-(`isAdminEmail()` in `firestore.rules`) — not just by hiding the
-`admin.html` URL. Anyone can visit `admin.html`, but only those two
-signed-in emails can actually write data; everyone else gets a
-permission-denied error if they try. Regular instructors and guests can
-still add/edit/delete outcomes on topics they're assigned to (that's
-`allow update` on `topics`, open to any signed-in user).
+There's no email verification, no passwords, and no PINs anywhere in this
+app — access is controlled entirely by codes, checked server-side by
+Firestore, never exposed to the browser:
 
-To change who the admins are, edit the email list in both:
-- `firestore.rules` → `isAdminEmail()`
-- `app.js` → `ADMIN_EMAILS` (controls who can request a login link before any data exists)
-- `admin.html` → `ADMIN_EMAILS` (controls whether the import section is shown)
+- **Instructors with an email on file** type their email and get in
+  instantly if it matches the imported list — no proof of ownership is
+  required. This trusts convenience over strict identity verification,
+  since these instructors can only edit their own assigned topics.
+- **Instructors without an email** use their academic year's access code
+  (`accessCodes/{year}` in Firestore), then pick their name.
+- **Administrators** (able to import/manage the full instructor roster and
+  topics) need the separate admin code (`adminAccess/main` in Firestore).
+  Firestore compares the code submitted against the real one internally
+  (`isAdmin()` in `firestore.rules`) — the real code is never readable by
+  any client, even a signed-in one.
 
-Then republish `firestore.rules` in the Firebase console and re-upload the two JS/HTML files.
+To change the admin code or any year's code, edit the corresponding
+document directly in the Firestore **Data** tab — no redeploy needed.
