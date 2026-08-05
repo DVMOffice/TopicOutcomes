@@ -1,35 +1,36 @@
 # Learning Outcomes Collection System
 
-Sistema para que los instructores colaboren en construir la lista final de
-resultados de aprendizaje (*learning outcomes*) por tema académico, sin que
-el administrador tenga que consolidarlos manualmente. Todo corre en el
-navegador — sin backend, sin Node, sin scripts aparte.
+A system for instructors to collaborate on building the final list of
+learning outcomes for each academic topic, so the administrator doesn't
+have to manually consolidate them. Everything runs in the browser — no
+backend, no Node, no separate scripts.
 
-## Estructura del proyecto (11 archivos de código, sin subcarpetas)
+## Project structure (11 code files, no subfolders)
 
-| Archivo | Qué contiene | Cuándo tocarlo |
+| File | What it contains | When to touch it |
 |---|---|---|
-| `firebaseConfig.js` | Conexión a tu proyecto de Firebase | Solo una vez, al conectar tu proyecto |
-| `app.js` | Todo lo de identidad: login por correo, login invitado, sesión, búsqueda de instructores | Si algo del login falla |
-| `dataEngine.js` | Todo lo de datos: temas, resultados de aprendizaje, progreso, actividad y exportación | Si algo de los outcomes o la exportación falla |
-| `importEngine.js` | Lee tus 2 Excel directo en el navegador y los sube a Firestore | Si necesitas ajustar qué filas se excluyen al importar |
-| `index.html` | Login (correo + invitado), lógica incluida adentro | Diseño/flujo de login |
-| `dashboard.html` | Panel del instructor | Panel del instructor |
-| `topic.html` | Colaboración por tema en tiempo real | Cómo se agregan/editan outcomes |
-| `admin.html` | Estadísticas, importar datos, filtros y exportar | Panel del administrador |
-| `style.css` | Todo el diseño | Cambios visuales |
-| `firestore.rules` | Reglas de seguridad (se pegan en la consola de Firebase) | Quién puede leer/escribir qué |
-| `FIREBASE_SETUP.md` | Guía paso a paso | — |
+| `firebaseConfig.js` | Connection to your Firebase project | Only once, when connecting your project |
+| `app.js` | Everything about identity: email login, guest login, session, instructor lookups | If something about login breaks |
+| `dataEngine.js` | Everything about data: topics, learning outcomes, progress, activity, and export | If something about outcomes or export breaks |
+| `importEngine.js` | Reads your 2 Excel files directly in the browser and uploads them to Firestore | If you need to adjust which rows get excluded during import |
+| `index.html` | Login (email + guest), logic included inline | Login design/flow |
+| `dashboard.html` | Instructor dashboard | Instructor dashboard |
+| `topic.html` | Real-time topic collaboration | How outcomes are added/edited |
+| `admin.html` | Stats, data import, filters, and export | Admin dashboard |
+| `style.css` | All the design | Visual changes |
+| `firestore.rules` | Security rules (paste into the Firebase console) | Who can read/write what |
+| `FIREBASE_SETUP.md` | Step-by-step setup guide | — |
 
-**Por qué así:** cada HTML trae su lógica de pantalla adentro (no se
-reutiliza entre páginas). Lo que sí se comparte vive en exactamente 3
-archivos: `app.js` (identidad), `dataEngine.js` (datos) e `importEngine.js`
-(importación). Nada de Node, nada de terminal, nada de claves de servicio.
+**Why it's organized this way:** each HTML page carries its own screen
+logic inline (it's rarely reused between pages). What IS shared lives in
+exactly 3 files: `app.js` (identity), `dataEngine.js` (data), and
+`importEngine.js` (import). No Node, no terminal, no service account keys.
 
-**Tus Excel no van en el repositorio** — son datos privados. Los subes
-directo en `admin.html` cuando quieras importar/actualizar datos.
+**Your Excel files are not part of the repository** — they contain
+private instructor data. You upload them directly in `admin.html`
+whenever you need to import or refresh data.
 
-## Modelo de datos (Firestore)
+## Data model (Firestore)
 
 ### `instructors/{instructorId}`
 ```json
@@ -49,30 +50,31 @@ directo en `admin.html` cuando quieras importar/actualizar datos.
       "updatedBy": "I001", "updatedByName": "Maria Smith", "updatedAt": "..." }
   ],
   "completionStatus": "in_progress",
-  "activityHistory": [ { "instructorId": "I002", "instructorName": "John Lee", "action": "agregó el resultado #3", "timestamp": "..." } ]
+  "activityHistory": [ { "instructorId": "I002", "instructorName": "John Lee", "action": "added outcome #3", "timestamp": "..." } ]
 }
 ```
 
 ### `accessCodes/{academicYear}`
 ```json
-{ "code": "UCVM-Y1-2026" }
+{ "code": "UCVM-Y1" }
 ```
 
-Un solo documento `topics/{topicId}` es compartido por todos los
-instructores asignados: cuando uno agrega/edita un resultado, todos lo ven
-en tiempo real, sin listas duplicadas por instructor.
+A single `topics/{topicId}` document is shared by all assigned
+instructors: when one adds or edits an outcome, everyone sees it in real
+time — no duplicated lists per instructor.
 
-## Limpieza automática al importar
+## Automatic cleanup of non-teaching rows
 
-`importEngine.js` excluye filas cuyo `Type` sea `LAB` o `Quiz/Midterm`, o
-cuyo `Topic` contenga "lunch", "holiday", "midterm", "final exam",
-"practical exam", "review session", o filas sin curso asignado. El
-resultado de la importación (cuántas se excluyeron) se muestra en pantalla.
+`importEngine.js` excludes rows whose `Type` is `LAB` or `Quiz/Midterm`,
+or whose `Topic` contains "lunch", "holiday", "midterm", "final exam",
+"practical exam", "review session", or rows with no course assigned. The
+import result (how many rows were excluded) is shown on screen after
+importing.
 
-## Nota de seguridad
+## Security note
 
-Las reglas actuales confían en que solo tú conoces la URL de `admin.html`.
-Cualquier instructor con correo real puede en teoría escribir en
-`instructors`/`topics` (necesario para que la importación funcione sin
-backend). Si quieres restringir la importación a un solo correo, `firestore.rules`
-ya trae comentada la función `isAdminEmail()` lista para activar.
+The current rules trust that only you know the URL of `admin.html`. Any
+instructor with a real email can technically write to `instructors`/`topics`
+(this is required for the import to work without a backend). If you want
+to restrict importing to a single email address, `firestore.rules` already
+includes a commented-out `isAdminEmail()` function ready to enable.
