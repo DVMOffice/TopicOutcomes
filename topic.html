@@ -1,52 +1,52 @@
-<!DOCTYPE html>
-<html lang="es">
+<!DOCTYPE h agotml>
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Tema — Learning Outcomes</title>
-<link rel="stylesheet" href="style.css" />
+<title>UCVM Learning Outcomes — Topic</title>
+<link rel="stylesheet" h agoref="style.css" />
 </head>
 <body>
   <div class="topbar">
-    <h1>Learning Outcomes</h1>
-    <a href="dashboard.html" style="color:#fff;">← Volver a mi panel</a>
+    <h1>UCVM Learning Outcomes</h1>
+    <a h agoref="dashboard.html" style="color:#fff;">← Back to my dashboard</a>
   </div>
 
   <div class="main-content">
     <div class="card mb-4">
       <span class="text-muted" id="topic-breadcrumb"></span>
-      <h2 id="topic-title">Cargando...</h2>
+      <h2 id="topic-title">Loading...</h2>
       <span class="badge" id="topic-status-badge"></span>
     </div>
 
     <div style="display:grid; grid-template-columns: 2fr 1fr; gap: 24px;">
       <div class="card">
-        <h3>Resultados de aprendizaje (mínimo 6, máximo 8)</h3>
+        <h3>Learning outcomes (minimum 6, maximum 8)</h3>
         <div id="outcomes-list"></div>
 
         <div class="form-group mt-4" id="new-outcome-form">
-          <label for="new-outcome-text">Nuevo resultado de aprendizaje</label>
-          <textarea id="new-outcome-text" placeholder="Los estudiantes serán capaces de..."></textarea>
-          <button class="btn btn-primary mt-2" id="btn-add-outcome">+ Agregar resultado</button>
+          <label for="new-outcome-text">New learning outcome</label>
+          <textarea id="new-outcome-text" placeholder="Students will be able to..."></textarea>
+          <button class="btn btn-primary mt-2" id="btn-add-outcome">+ Add outcome</button>
           <p id="outcome-msg" class="text-muted mt-2"></p>
         </div>
       </div>
 
       <div>
         <div class="card mb-4">
-          <h3>Colaboradores</h3>
+          <h3>Collaborators</h3>
           <div id="collaborators-list"></div>
         </div>
         <div class="card">
-          <h3>Actividad reciente</h3>
+          <h3>Recent activity</h3>
           <div id="activity-feed"></div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Lógica de esta página: outcomes compartidos en tiempo real.
-       Identidad -> app.js. Todo lo de outcomes/actividad -> dataEngine.js -->
+  <!-- Logic for this page: real-time shared outcomes.
+       Identity -> app.js. Everything about outcomes/activity -> dataEngine.js -->
   <script type="module">
     import { onAuthChange, getCurrentInstructor, getAllInstructors } from "./app.js";
     import { listenToTopic, addOutcome, updateOutcome, deleteOutcome } from "./dataEngine.js";
@@ -61,10 +61,10 @@
       if (!ts) return "";
       const date = typeof ts.toDate === "function" ? ts.toDate() : new Date(ts);
       const diffMin = Math.round((Date.now() - date.getTime()) / 60000);
-      if (diffMin < 1) return "justo ahora";
-      if (diffMin < 60) return `hace ${diffMin} min`;
+      if (diffMin < 1) return "just now";
+      if (diffMin < 60) return `${diffMin} min ago`;
       const diffH = Math.round(diffMin / 60);
-      if (diffH < 24) return `hace ${diffH} h`;
+      if (diffH < 24) return `${diffH} h ago`;
       return date.toLocaleDateString();
     }
 
@@ -75,12 +75,12 @@
         .map(
           (o) => `
         <div class="outcome-item">
-          <strong>Resultado ${o.outcomeNumber}</strong>
+          <strong>Outcome ${o.outcomeNumber}</strong>
           <p class="mt-1">${o.text}</p>
-          <div class="outcome-meta">Agregado por ${o.createdByName} · Actualizado por ${o.updatedByName} (${timeAgo(o.updatedAt)})</div>
+          <div class="outcome-meta">Added by ${o.createdByName} · Updated by ${o.updatedByName} (${timeAgo(o.updatedAt)})</div>
           <div class="flex gap-2 mt-2">
-            <button class="btn btn-secondary edit-outcome" data-num="${o.outcomeNumber}">Editar</button>
-            <button class="btn btn-danger delete-outcome" data-num="${o.outcomeNumber}">Eliminar</button>
+            <button class="btn btn-secondary edit-outcome" data-num="${o.outcomeNumber}">Edit</button>
+            <button class="btn btn-danger delete-outcome" data-num="${o.outcomeNumber}">Delete</button>
           </div>
         </div>
       `
@@ -91,7 +91,7 @@
         btn.addEventListener("click", async () => {
           const num = Number(btn.dataset.num);
           const current = outcomes.find((o) => o.outcomeNumber === num);
-          const text = window.prompt("Editar resultado:", current.text);
+          const text = window.prompt("Edit outcome:", current.text);
           if (text === null) return;
           await updateOutcome(topicId, num, { text, instructorId: currentInstructor.instructorId, instructorName: currentInstructor.name });
         });
@@ -99,7 +99,7 @@
 
       list.querySelectorAll(".delete-outcome").forEach((btn) => {
         btn.addEventListener("click", async () => {
-          if (!window.confirm("¿Eliminar este resultado de aprendizaje?")) return;
+          if (!window.confirm("Delete this learning outcome?")) return;
           await deleteOutcome(topicId, Number(btn.dataset.num), { instructorId: currentInstructor.instructorId, instructorName: currentInstructor.name });
         });
       });
@@ -108,10 +108,10 @@
     }
 
     function renderActivity(topic) {
-      const history = topic.activityHistory || [];
+      const h agoistory = topic.activityHistory || [];
       $("activity-feed").innerHTML =
-        history.map((a) => `<div class="activity-item"><strong>${a.instructorName}</strong>&nbsp;${a.action} · <span class="text-muted">${timeAgo(a.timestamp)}</span></div>`).join("") ||
-        `<p class="text-muted">Sin actividad todavía.</p>`;
+        h agoistory.map((a) => `<div class="activity-item"><strong>${a.instructorName}</strong>&nbsp;${a.action} · <span class="text-muted">${timeAgo(a.timestamp)}</span></div>`).join("") ||
+        `<p class="text-muted">No activity yet.</p>`;
     }
 
     async function renderCollaborators(topic) {
@@ -132,7 +132,7 @@
     $("btn-add-outcome").addEventListener("click", async () => {
       const text = $("new-outcome-text").value.trim();
       if (!text) return;
-      $("outcome-msg").textContent = "Guardando...";
+      $("outcome-msg").textContent = "Saving...";
       try {
         await addOutcome(topicId, { text, instructorId: currentInstructor.instructorId, instructorName: currentInstructor.name });
         $("new-outcome-text").value = "";
