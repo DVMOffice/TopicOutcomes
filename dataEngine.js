@@ -1,15 +1,15 @@
 /**
  * dataEngine.js
  * ---------------------------------------------------------------
- * Todo lo relacionado con "los datos" vive aquí:
- *   - Leer los temas asignados a un instructor
- *   - Escuchar un tema en tiempo real (colaboración compartida)
- *   - Agregar / editar / eliminar resultados de aprendizaje
- *   - Calcular progreso
- *   - Aplanar y exportar (CSV / Excel / JSON, listo para Power Query)
+ * Everything related to "the data" lives here:
+ *   - Read the topics assigned to an instructor
+ *   - Listen to a topic in real time (shared collaboration)
+ *   - Add / edit / delete learning outcomes
+ *   - Calculate progress
+ *   - Flatten and export (CSV / Excel / JSON, ready for Power Query)
  *
- * Si necesitas corregir algo sobre los outcomes, el progreso o las
- * exportaciones, es AQUÍ, en este único archivo.
+ * If you need to fix anything about outcomes, progress, or
+ * exports, do it HERE, in this single file.
  * ---------------------------------------------------------------
  */
 import { db } from "./firebaseConfig.js";
@@ -76,7 +76,7 @@ export async function addOutcome(topicId, { text, instructorId, instructorName }
     const data = snap.data();
     const outcomes = data.outcomes || [];
     if (outcomes.length >= MAX_OUTCOMES) {
-      throw new Error(`Este tema ya tiene el máximo recomendado de ${MAX_OUTCOMES} resultados.`);
+      throw new Error(`This topic already has the recommended maximum of ${MAX_OUTCOMES} outcomes.`);
     }
     const now = Timestamp.now();
     const newOutcome = {
@@ -94,7 +94,7 @@ export async function addOutcome(topicId, { text, instructorId, instructorName }
       outcomes: updatedOutcomes,
       completionStatus: computeStatus(updatedOutcomes),
       activityHistory: [
-        activityEntry(`agregó el resultado #${newOutcome.outcomeNumber}`, instructorId, instructorName),
+        activityEntry(`added outcome #${newOutcome.outcomeNumber}`, instructorId, instructorName),
         ...(data.activityHistory || []).slice(0, 49),
       ],
     });
@@ -123,7 +123,7 @@ export async function updateOutcome(topicId, outcomeNumber, { text, instructorId
       outcomes,
       completionStatus: computeStatus(outcomes),
       activityHistory: [
-        activityEntry(`actualizó el resultado #${outcomeNumber}`, instructorId, instructorName),
+        activityEntry(`updated outcome #${outcomeNumber}`, instructorId, instructorName),
         ...(data.activityHistory || []).slice(0, 49),
       ],
     });
@@ -144,7 +144,7 @@ export async function deleteOutcome(topicId, outcomeNumber, { instructorId, inst
       outcomes,
       completionStatus: computeStatus(outcomes),
       activityHistory: [
-        activityEntry(`eliminó un resultado`, instructorId, instructorName),
+        activityEntry(`deleted an outcome`, instructorId, instructorName),
         ...(data.activityHistory || []).slice(0, 49),
       ],
     });
@@ -167,7 +167,7 @@ export function topicPercent(topic) {
 }
 
 // ================================================================
-// EXPORTACIÓN (flat, listo para Power Query)
+// EXPORT (flat, ready for Power Query)
 // ================================================================
 
 const EXPORT_COLUMNS = [
