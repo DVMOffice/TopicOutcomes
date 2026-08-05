@@ -14,7 +14,7 @@
   </div>
 
   <div class="main-content">
-    <div class="card mb-4">
+    <div class="card mb-4" id="import-section">
       <h3>Import data from Excel</h3>
       <p class="text-muted">Upload the two original files. Everything is cleaned up and uploaded to Firestore directly from the browser — no installation needed.</p>
       <div class="form-group mt-2">
@@ -79,9 +79,14 @@
   <!-- Logic for this page: stats, filters, and export.
        Instructors -> app.js. Topics/filters/export -> dataEngine.js -->
   <script type="module">
-    import { getAllInstructors } from "./app.js";
+    import { getAllInstructors, onAuthChange } from "./app.js";
     import { getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible } from "./dataEngine.js";
     import { importFromExcelFiles } from "./importEngine.js";
+
+    // Keep this in sync with the admin email list in firestore.rules.
+    // This is only a UI convenience (hides the import section for
+    // non-admins) — the real security boundary is firestore.rules.
+    const ADMIN_EMAILS = ["elsa.sanchez@ucalgary.ca", "karen.schale@ucalgary.ca"];
 
     const $ = (id) => document.getElementById(id);
     let allTopics = [];
@@ -192,14 +197,22 @@
     $("btn-export-excel").addEventListener("click", () => downloadExcelCompatible(flattenToRows(applyFilters(allTopics, currentFilters()))));
     $("btn-export-json").addEventListener("click", () => downloadJSON(flattenToRows(applyFilters(allTopics, currentFilters()))));
 
-    (async function init() {
+    onAuthChange(async (user) => {
+      if (!user) {
+        window.location.href = "index.html";
+        return;
+      }
+
+      const isAdmin = !user.isAnonymous && ADMIN_EMAILS.includes((user.email || "").toLowerCase());
+      $("import-section").style.display = isAdmin ? "block" : "none";
+
       allTopics = await getAllTopics();
       allInstructors = await getAllInstructors();
       renderStats();
       renderInstructorProgress();
       populateFilterOptions();
       refreshPreview();
-    })();
+    });
   </script>
 </body>
 </html>
