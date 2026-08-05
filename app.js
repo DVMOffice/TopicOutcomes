@@ -2,8 +2,11 @@
  * app.js
  * ---------------------------------------------------------------
  * Everything related to "who am I" lives here:
- *   - Email login (magic link, no password, no PIN)
- *   - Guest login (academic-year code + name search)
+ *   - Instructor access by email (no password, instant — only works
+ *     if that email already exists in the "instructors" list)
+ *   - Instructor access by academic-year code + name search (for
+ *     instructors who don't have an email on file)
+ *   - Administrator access by a separate admin code
  *   - Current session / sign out
  *   - Instructor searches and lookups
  *
@@ -13,9 +16,6 @@
  */
 import { auth, db } from "./firebaseConfig.js";
 import {
-  sendSignInLinkToEmail,
-  isSignInWithEmailLink,
-  signInWithEmailLink,
   signInAnonymously,
   onAuthStateChanged,
   signOut,
@@ -28,58 +28,43 @@ import {
   query,
   where,
   setDoc,
+  deleteDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-const ACTION_CODE_SETTINGS = {
-  url: window.location.origin + "/index.html",
-  handleCodeInApp: true,
-};
-
-// Admin emails can always sign in, even before any data has been imported
-// (otherwise nobody could ever request the first import). This is not a
-// security boundary — that's enforced by firestore.rules — it just
-// controls who gets a login link sent before the instructor roster exists.
-const ADMIN_EMAILS = ["elsa.sanchez@ucalgary.ca", "karen.schale@ucalgary.ca"];
+// Makes sure there is an active (anonymous) Firebase Auth session.
+// Every access path — email, year code, or admin code — relies on
+// this same underlying session; what differs is which identity gets
+// attached to it afterwards (an instructor ID, or an admin flag).
+async function ensureSignedIn() {
+  if (!auth.currentUser) {
+    await signInAnonymously(auth);
+  }
+  return auth.currentUser;
+}
 
 // ================================================================
-// EMAIL LOGIN (magic link)
+// INSTRUCTOR ACCESS BY EMAIL (no password, instant)
 // ================================================================
 
-/** Step 1: sends the link, only if the email exists in "instructors" — or is an admin email. */
-export async function requestInstructorLoginLink(email) {
+/** Only works if this exact email already exists in "instructors". */
+export async function signInWithInstructorEmail(email) {
   const normalized = email.trim().toLowerCase();
-
-  if (!ADMIN_EMAILS.includes(normalized)) {
-    const q = query(collection(db, "instructors"), where("email", "==", normalized));
-    const snap = await getDocs(q);
-    if (snap.empty) {
-      throw new Error("We could not find that email in the instructor list. Contact your administrator.");
-    }
+  await ensureSignedIn(); // must be signed in before reading "instructors" (see firestore.rules)
+  const instructor = await getInstructorByEmail(normalized);
+  if (!instructor) {
+    throw new Error("We could not find that email in the instructor list. Contact your administrator.");
   }
-
-  await sendSignInLinkToEmail(auth, normalized, ACTION_CODE_SETTINGS);
-  window.localStorage.setItem("loginEmail", normalized);
-}
-
-/** Step 2: call this when loading index.html to complete login if arriving from the link. */
-export async function completeInstructorLoginIfNeeded() {
-  if (!isSignInWithEmailLink(auth, window.location.href)) return null;
-
-  let email = window.localStorage.getItem("loginEmail");
-  if (!email) {
-    email = window.prompt("Confirm your email to complete sign-in:");
-  }
-  const result = await signInWithEmailLink(auth, email, window.location.href);
-  window.localStorage.removeItem("loginEmail");
-  return result.user;
+  setGuestInstructorId(instructor.instructorId);
+  return instructor;
 }
 
 // ================================================================
-// GUEST LOGIN (academic-year code)
+// INSTRUCTOR ACCESS BY YEAR CODE (for instructors with no email)
 // ================================================================
 
 export async function validateGuestCode(academicYear, code) {
+  await ensureSignedIn(); // must be signed in before reading "accessCodes" (see firestore.rules)
   const snap = await getDocs(collection(db, "accessCodes"));
   const match = snap.docs.find((d) => d.id === academicYear);
   if (!match) throw new Error("Invalid academic year.");
@@ -90,12 +75,12 @@ export async function validateGuestCode(academicYear, code) {
 }
 
 export async function startGuestSession(academicYear) {
-  const cred = await signInAnonymously(auth);
-  await setDoc(doc(db, "guestSessions", cred.user.uid), {
+  const user = await ensureSignedIn();
+  await setDoc(doc(db, "guestSessions", user.uid), {
     academicYear,
     startedAt: serverTimestamp(),
   });
-  return cred.user;
+  return user;
 }
 
 export function setGuestInstructorId(instructorId) {
@@ -103,6 +88,37 @@ export function setGuestInstructorId(instructorId) {
 }
 export function getGuestInstructorId() {
   return window.sessionStorage.getItem("guestInstructorId");
+}
+
+// ================================================================
+// ADMINISTRATOR ACCESS BY ADMIN CODE
+// ================================================================
+
+/**
+ * Submits the admin code. Firestore itself checks whether it's
+ * correct (see firestore.rules) — the real value is never readable
+ * by the client, so this either succeeds or throws a permission
+ * error, never leaking the real code.
+ */
+export async function signInAsAdmin(code) {
+  const user = await ensureSignedIn();
+  try {
+    await setDoc(doc(db, "adminSessions", user.uid), {
+      codeProvided: code.trim(),
+      createdAt: serverTimestamp(),
+    });
+  } catch (err) {
+    throw new Error("Incorrect admin code.");
+  }
+  window.sessionStorage.setItem("isAdmin", "true");
+  return true;
+}
+
+export async function isCurrentUserAdmin() {
+  if (window.sessionStorage.getItem("isAdmin") !== "true") return false;
+  if (!auth.currentUser) return false;
+  const snap = await getDoc(doc(db, "adminSessions", auth.currentUser.uid));
+  return snap.exists();
 }
 
 // ================================================================
@@ -114,18 +130,21 @@ export function onAuthChange(callback) {
 }
 
 export async function logOut() {
+  const uid = auth.currentUser?.uid;
   window.sessionStorage.removeItem("guestInstructorId");
+  window.sessionStorage.removeItem("isAdmin");
+  if (uid) {
+    // Best-effort cleanup; ignore failures (e.g. doc never existed).
+    try { await deleteDoc(doc(db, "adminSessions", uid)); } catch (e) { /* noop */ }
+  }
   await signOut(auth);
 }
 
-/** Resolves the full record of the current instructor (email or guest). */
+/** Resolves the full record of the current instructor (email or year-code access). */
 export async function getCurrentInstructor(user) {
   if (!user) return null;
-  if (user.isAnonymous) {
-    const guestId = getGuestInstructorId();
-    return guestId ? getInstructorById(guestId) : null;
-  }
-  return getInstructorByEmail(user.email);
+  const guestId = getGuestInstructorId();
+  return guestId ? getInstructorById(guestId) : null;
 }
 
 // ================================================================
