@@ -1,35 +1,35 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Learning Outcomes Collection System</title>
+<title>UCVM Learning Outcomes — Faculty Sign In</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="container-centered">
     <div class="card" style="width: 100%; max-width: 420px;">
-      <h1 style="text-align:center;">Learning Outcomes</h1>
-      <p class="text-muted" style="text-align:center;">Sistema de recolección de resultados de aprendizaje</p>
+      <h1 style="text-align:center;">UCVM Learning Outcomes</h1>
+      <p class="text-muted" style="text-align:center;">Faculty Learning Outcomes Collection</p>
 
       <div id="step-choice">
-        <button class="btn btn-primary btn-block mt-4" id="btn-show-email">Iniciar sesión con mi correo</button>
-        <button class="btn btn-secondary btn-block mt-2" id="btn-show-guest">Continuar como invitado</button>
+        <button class="btn btn-primary btn-block mt-4" id="btn-show-email">Sign in with my email</button>
+        <button class="btn btn-secondary btn-block mt-2" id="btn-show-guest">Continue as guest</button>
       </div>
 
       <div id="step-email" style="display:none;">
         <div class="form-group mt-4">
-          <label for="email-input">Correo asignado</label>
+          <label for="email-input">Assigned email</label>
           <input type="email" id="email-input" placeholder="nombre@ejemplo.com" />
         </div>
-        <button class="btn btn-primary btn-block" id="btn-send-link">Enviar enlace de acceso</button>
+        <button class="btn btn-primary btn-block" id="btn-send-link">Send access link</button>
         <p id="email-msg" class="text-muted mt-2"></p>
-        <button class="btn btn-secondary btn-block mt-2" id="btn-back-1">Volver</button>
+        <button class="btn btn-secondary btn-block mt-2" id="btn-back-1">Back</button>
       </div>
 
       <div id="step-guest-code" style="display:none;">
         <div class="form-group mt-4">
-          <label for="guest-year">Año académico</label>
+          <label for="guest-year">Academic year</label>
           <select id="guest-year">
             <option value="Year 1">Year 1</option>
             <option value="Year 2">Year 2</option>
@@ -37,26 +37,26 @@
           </select>
         </div>
         <div class="form-group">
-          <label for="guest-code">Código de acceso</label>
-          <input type="text" id="guest-code" placeholder="Código del año académico" />
+          <label for="guest-code">Access code</label>
+          <input type="text" id="guest-code" placeholder="Academic year code" />
         </div>
-        <button class="btn btn-primary btn-block" id="btn-validate-code">Continuar</button>
+        <button class="btn btn-primary btn-block" id="btn-validate-code">Continue</button>
         <p id="guest-msg" class="text-muted mt-2"></p>
-        <button class="btn btn-secondary btn-block mt-2" id="btn-back-2">Volver</button>
+        <button class="btn btn-secondary btn-block mt-2" id="btn-back-2">Back</button>
       </div>
 
       <div id="step-guest-search" style="display:none;">
         <div class="form-group mt-4">
-          <label for="guest-name-search">Busca tu nombre</label>
-          <input type="search" id="guest-name-search" placeholder="Escribe tu nombre..." />
+          <label for="guest-name-search">Search your name</label>
+          <input type="search" id="guest-name-search" placeholder="Type your name..." />
         </div>
         <div id="guest-results"></div>
       </div>
     </div>
   </div>
 
-  <!-- Lógica de esta página: login por correo + invitado. Todo lo compartido
-       (envío de enlace, validación de código, sesión) vive en app.js -->
+  <!-- Logic for this page: email + guest login. Everything shared
+       (sending the link, validating the code, session) lives in app.js -->
   <script type="module">
     import {
       requestInstructorLoginLink,
@@ -82,10 +82,10 @@
     $("btn-back-2").addEventListener("click", () => showStep("step-choice"));
 
     $("btn-send-link").addEventListener("click", async () => {
-      $("email-msg").textContent = "Enviando...";
+      $("email-msg").textContent = "Sending...";
       try {
         await requestInstructorLoginLink($("email-input").value);
-        $("email-msg").textContent = "Enlace enviado. Revisa tu correo y haz clic en el enlace para entrar.";
+        $("email-msg").textContent = "Link sent. Check your email and click the link to sign in.";
       } catch (err) {
         $("email-msg").textContent = err.message;
       }
@@ -98,7 +98,7 @@
     let selectedYear = null;
 
     $("btn-validate-code").addEventListener("click", async () => {
-      $("guest-msg").textContent = "Validando...";
+      $("guest-msg").textContent = "Validating...";
       try {
         const year = $("guest-year").value;
         await validateGuestCode(year, $("guest-code").value);
@@ -120,7 +120,7 @@
         const matches = await searchInstructorsByName(term);
         $("guest-results").innerHTML = matches
           .map((m) => `<button class="btn btn-secondary btn-block mt-2 guest-pick" data-id="${m.instructorId}">${m.name}</button>`)
-          .join("") || `<p class="text-muted mt-2">Sin resultados.</p>`;
+          .join("") || `<p class="text-muted mt-2">No results.</p>`;
 
         document.querySelectorAll(".guest-pick").forEach((btn) => {
           btn.addEventListener("click", () => {
