@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>UCVM Learning Outcomes — Faculty Sign In</title>
+<title>UCVM Learning Outcomes — Sign In</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -14,15 +14,18 @@
 
       <div id="step-choice">
         <button class="btn btn-primary btn-block mt-4" id="btn-show-email">Sign in with my email</button>
-        <button class="btn btn-secondary btn-block mt-2" id="btn-show-guest">Continue as guest</button>
+        <button class="btn btn-secondary btn-block mt-2" id="btn-show-guest">I don't have an email on file</button>
+        <p class="text-muted mt-4" style="text-align:center; font-size: 0.8rem;">
+          <a href="#" id="link-show-admin">Administrator access</a>
+        </p>
       </div>
 
       <div id="step-email" style="display:none;">
         <div class="form-group mt-4">
-          <label for="email-input">Assigned email</label>
-          <input type="email" id="email-input" placeholder="nombre@ejemplo.com" />
+          <label for="email-input">Your email</label>
+          <input type="email" id="email-input" placeholder="name@ucalgary.ca" />
         </div>
-        <button class="btn btn-primary btn-block" id="btn-send-link">Send access link</button>
+        <button class="btn btn-primary btn-block" id="btn-email-continue">Continue</button>
         <p id="email-msg" class="text-muted mt-2"></p>
         <button class="btn btn-secondary btn-block mt-2" id="btn-back-1">Back</button>
       </div>
@@ -52,49 +55,59 @@
         </div>
         <div id="guest-results"></div>
       </div>
+
+      <div id="step-admin" style="display:none;">
+        <div class="form-group mt-4">
+          <label for="admin-code">Administrator code</label>
+          <input type="text" id="admin-code" placeholder="Admin code" />
+        </div>
+        <button class="btn btn-primary btn-block" id="btn-admin-continue">Continue</button>
+        <p id="admin-msg" class="text-muted mt-2"></p>
+        <button class="btn btn-secondary btn-block mt-2" id="btn-back-3">Back</button>
+      </div>
     </div>
   </div>
 
-  <!-- Logic for this page: email + guest login. Everything shared
-       (sending the link, validating the code, session) lives in app.js -->
+  <!-- Logic for this page: 3 access paths (email / year code / admin code).
+       Everything shared lives in app.js -->
   <script type="module">
     import {
-      requestInstructorLoginLink,
-      completeInstructorLoginIfNeeded,
+      signInWithInstructorEmail,
       validateGuestCode,
       startGuestSession,
       setGuestInstructorId,
       searchInstructorsByName,
+      signInAsAdmin,
       onAuthChange,
     } from "./app.js";
 
     const $ = (id) => document.getElementById(id);
 
     function showStep(id) {
-      ["step-choice", "step-email", "step-guest-code", "step-guest-search"].forEach((s) => {
+      ["step-choice", "step-email", "step-guest-code", "step-guest-search", "step-admin"].forEach((s) => {
         $(s).style.display = s === id ? "block" : "none";
       });
     }
 
     $("btn-show-email").addEventListener("click", () => showStep("step-email"));
     $("btn-show-guest").addEventListener("click", () => showStep("step-guest-code"));
+    $("link-show-admin").addEventListener("click", (e) => { e.preventDefault(); showStep("step-admin"); });
     $("btn-back-1").addEventListener("click", () => showStep("step-choice"));
     $("btn-back-2").addEventListener("click", () => showStep("step-choice"));
+    $("btn-back-3").addEventListener("click", () => showStep("step-choice"));
 
-    $("btn-send-link").addEventListener("click", async () => {
-      $("email-msg").textContent = "Sending...";
+    // --- Email access (no password) ---
+    $("btn-email-continue").addEventListener("click", async () => {
+      $("email-msg").textContent = "Checking...";
       try {
-        await requestInstructorLoginLink($("email-input").value);
-        $("email-msg").textContent = "Link sent. Check your email and click the link to sign in.";
+        await signInWithInstructorEmail($("email-input").value);
+        window.location.href = "dashboard.html";
       } catch (err) {
         $("email-msg").textContent = err.message;
       }
     });
 
-    completeInstructorLoginIfNeeded().then((user) => {
-      if (user) window.location.href = "dashboard.html";
-    });
-
+    // --- Year code + name search ---
     let selectedYear = null;
 
     $("btn-validate-code").addEventListener("click", async () => {
@@ -131,8 +144,25 @@
       }, 250);
     });
 
+    // --- Admin code ---
+    $("btn-admin-continue").addEventListener("click", async () => {
+      $("admin-msg").textContent = "Checking...";
+      try {
+        await signInAsAdmin($("admin-code").value);
+        window.location.href = "admin.html";
+      } catch (err) {
+        $("admin-msg").textContent = err.message;
+      }
+    });
+
+    // If already signed in with a known identity, skip straight ahead
     onAuthChange((user) => {
-      if (user && !user.isAnonymous) window.location.href = "dashboard.html";
+      if (!user) return;
+      if (window.sessionStorage.getItem("isAdmin") === "true") {
+        window.location.href = "admin.html";
+      } else if (window.sessionStorage.getItem("guestInstructorId")) {
+        window.location.href = "dashboard.html";
+      }
     });
   </script>
 </body>
