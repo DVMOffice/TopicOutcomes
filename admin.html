@@ -105,7 +105,7 @@
         return;
       }
       list.innerHTML = reviewItems
-        .map((item, idx) => {
+        .map((item) => {
           const options = pendingAnalysis.allInstructorNames
             .map((name) => {
               const selected = item.suggestions.length === 1 && item.suggestions[0] === name ? "selected" : "";
@@ -113,15 +113,29 @@
             })
             .join("");
           const suggestionNote = item.suggestions.length > 1
-            ? `<span class="text-muted"> — could be: ${item.suggestions.join(" / ")}</span>`
+            ? `<div class="text-muted" style="font-size:0.85rem;">Could be: ${item.suggestions.join(" / ")}</div>`
             : "";
+          const moreCount = item.occurrenceCount - item.occurrenceSample.length;
+          const occurrenceHtml = `
+            <div class="text-muted mt-1" style="font-size:0.85rem;">
+              Appears ${item.occurrenceCount} time${item.occurrenceCount === 1 ? "" : "s"}:
+              <ul style="margin:4px 0 0 18px; padding:0;">
+                ${item.occurrenceSample.map((o) => `<li>${o}</li>`).join("")}
+                ${moreCount > 0 ? `<li>...and ${moreCount} more</li>` : ""}
+              </ul>
+            </div>
+          `;
           return `
-            <div class="form-group">
-              <label>"${item.rawText}"${suggestionNote}</label>
-              <select data-raw="${item.rawText}" class="review-mapping">
-                <option value="">— Keep as a new instructor named "${item.rawText}" (no email) —</option>
+            <div class="form-group" style="border-bottom:1px solid var(--color-border); padding-bottom:16px; margin-bottom:16px;">
+              <label>"${item.rawText}"</label>
+              ${suggestionNote}
+              ${occurrenceHtml}
+              <select data-raw="${item.rawText}" class="review-mapping" multiple size="4" style="height:auto;">
                 ${options}
               </select>
+              <div class="text-muted mt-1" style="font-size:0.8rem;">
+                Ctrl/Cmd+click to select more than one instructor (e.g. a co-taught session). Leave nothing selected to keep "${item.rawText}" as its own new instructor with no email.
+              </div>
             </div>
           `;
         })
@@ -156,7 +170,7 @@
       if (!pendingAnalysis) return;
       const mappings = {};
       document.querySelectorAll(".review-mapping").forEach((select) => {
-        mappings[select.dataset.raw] = select.value; // "" = keep as new instructor
+        mappings[select.dataset.raw] = Array.from(select.selectedOptions).map((o) => o.value); // [] = keep as new instructor
       });
 
       $("btn-confirm-import").disabled = true;
