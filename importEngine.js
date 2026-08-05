@@ -1,16 +1,25 @@
 /**
  * importEngine.js
  * ---------------------------------------------------------------
- * Data import DIRECTLY FROM THE BROWSER, no Node, no
- * terminal. The administrator uploads the two Excel files in
- * admin.html, this file reads them with SheetJS (loaded via CDN in
- * the HTML), normalizes them the same way as before, and writes
- * everything to Firestore using the browser SDK (writeBatch) —
- * exactly like a normal query.
+ * Data import DIRECTLY FROM THE BROWSER, no Node, no terminal.
  *
- * Requires that the current user is a real instructor (signed in
- * with email, not a guest) — see firestore.rules, which only allows
- * writes to "instructors" and "topics" from non-anonymous users.
+ * This is a TWO-STEP process on purpose, because instructor names in
+ * the master list don't always match the email list exactly (e.g.
+ * "CK" instead of "Cameron Knight"). Nothing gets auto-matched and
+ * uploaded silently:
+ *
+ *   1. analyzeImport(masterFile, emailsFile) reads both files and
+ *      returns every raw instructor name that could NOT be matched
+ *      with certainty, plus suggestions where possible (e.g. if the
+ *      text looks like initials and matches exactly one instructor).
+ *   2. The admin reviews that list in admin.html and picks the right
+ *      instructor (or "keep as a new instructor") for each one.
+ *   3. finalizeImport(..., mappings) applies those confirmed choices
+ *      and uploads everything to Firestore.
+ *
+ * Requires an admin session (validated via the admin code — see
+ * app.js signInAsAdmin) — enforced by firestore.rules, which only
+ * allows writes to "instructors" and "topics" from admin sessions.
  * ---------------------------------------------------------------
  */
 import { db } from "./firebaseConfig.js";
@@ -48,7 +57,16 @@ function slugify(str) {
   return String(str).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 60);
 }
 
-/** Reads an <input type="file"> and returns the SheetJS workbook. */
+function looksLikeInitials(text) {
+  return /^[A-Z]{2,4}$/.test(text.trim());
+}
+
+function computeInitials(fullName) {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length < 2) return parts[0]?.[0]?.toUpperCase() || "";
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function readWorkbook(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -92,18 +110,103 @@ async function readAccessList(file) {
   return byName;
 }
 
-function buildInstructorRoster(masterRowsByYear, accessByName) {
+function buildInitialsIndex(accessByName) {
+  const index = new Map();
+  for (const entry of accessByName.values()) {
+    const initials = computeInitials(entry.name);
+    if (!index.has(initials)) index.set(initials, []);
+    index.get(initials).push(entry);
+  }
+  return index;
+}
+
+function collectRawNames(masterRowsByYear) {
+  const raw = new Set();
+  for (const year of Object.keys(masterRowsByYear)) {
+    for (const row of masterRowsByYear[year]) {
+      if (!isRealTopicRow(row)) continue;
+      for (const n of [...splitNames(row["Primary Instructor"]), ...splitNames(row["Secondary Instructor"]), ...splitNames(row["Finalized Instructors"])]) {
+        raw.add(n);
+      }
+    }
+  }
+  return Array.from(raw);
+}
+
+// ================================================================
+// STEP 1 — Analyze: find every name that needs a human decision
+// ================================================================
+
+/**
+ * Reads both files and returns everything needed to review + finalize.
+ * Nothing is uploaded yet.
+ */
+export async function analyzeImport(masterListFile, emailsListFile, onProgress = () => {}) {
+  onProgress("Reading the master list...");
+  const masterRowsByYear = await readAllSheets(masterListFile);
+
+  onProgress("Reading the email list...");
+  const accessByName = await readAccessList(emailsListFile);
+  const initialsIndex = buildInitialsIndex(accessByName);
+
+  onProgress("Comparing instructor names...");
+  const rawNames = collectRawNames(masterRowsByYear);
+  const allInstructorNames = Array.from(accessByName.values()).map((a) => a.name).sort();
+
+  const reviewItems = [];
+  for (const raw of rawNames) {
+    if (accessByName.has(normalizeNameKey(raw))) continue; // exact match, no review needed
+
+    let suggestions = [];
+    if (looksLikeInitials(raw)) {
+      const candidates = initialsIndex.get(raw.trim().toUpperCase()) || [];
+      suggestions = candidates.map((c) => c.name);
+    }
+    reviewItems.push({ rawText: raw, suggestions });
+  }
+
+  return {
+    masterRowsByYear,
+    accessByName,
+    allInstructorNames,
+    reviewItems,           // [{ rawText: "CK", suggestions: ["Cameron Knight"] }, ...]
+    autoMatchedCount: rawNames.length - reviewItems.length,
+    totalRawNames: rawNames.length,
+  };
+}
+
+// ================================================================
+// STEP 2 — Finalize: apply the admin's confirmed mappings and upload
+// ================================================================
+
+function buildRoster(masterRowsByYear, accessByName, mappings) {
   const roster = new Map();
   let counter = 1;
-  function ensure(name) {
-    const key = normalizeNameKey(name);
+
+  function resolve(rawName) {
+    const exact = accessByName.get(normalizeNameKey(rawName));
+    if (exact) return exact;
+    const mapped = mappings[rawName]; // full instructor name chosen by the admin, or "" / undefined = keep as new
+    if (mapped && accessByName.has(normalizeNameKey(mapped))) return accessByName.get(normalizeNameKey(mapped));
+    return { name: rawName, email: "", active: true };
+  }
+
+  function ensure(rawName) {
+    const identity = resolve(rawName);
+    const key = normalizeNameKey(identity.name);
     if (roster.has(key)) return roster.get(key);
-    const access = accessByName.get(key);
     const id = `I${String(counter++).padStart(3, "0")}`;
-    const record = { instructorId: id, name, email: access?.email || "", accessType: access?.email ? "email" : "guest", active: access ? access.active : true };
+    const record = {
+      instructorId: id,
+      name: identity.name,
+      email: identity.email || "",
+      accessType: identity.email ? "email" : "guest",
+      active: identity.email ? identity.active : true,
+    };
     roster.set(key, record);
     return record;
   }
+
   for (const year of Object.keys(masterRowsByYear)) {
     for (const row of masterRowsByYear[year]) {
       if (!isRealTopicRow(row)) continue;
@@ -111,10 +214,10 @@ function buildInstructorRoster(masterRowsByYear, accessByName) {
       for (const n of names) ensure(n);
     }
   }
-  return roster;
+  return { roster, resolve };
 }
 
-function buildTopics(masterRowsByYear, roster) {
+function buildTopics(masterRowsByYear, roster, resolve) {
   const topics = [];
   let excludedCount = 0;
   const counters = new Map();
@@ -129,8 +232,12 @@ function buildTopics(masterRowsByYear, roster) {
       const roles = {};
       const assignedInstructorIDs = new Set();
 
-      function tag(names, role) {
-        for (const n of names) {
+      const primaryResolved = primary.map((n) => resolve(n).name);
+      const secondaryResolved = secondary.map((n) => resolve(n).name);
+      const finalizedResolved = finalized.map((n) => resolve(n).name);
+
+      function tag(resolvedNames, role) {
+        for (const n of resolvedNames) {
           const rec = roster.get(normalizeNameKey(n));
           if (!rec) continue;
           assignedInstructorIDs.add(rec.instructorId);
@@ -138,7 +245,7 @@ function buildTopics(masterRowsByYear, roster) {
           if (!roles[rec.instructorId].includes(role)) roles[rec.instructorId].push(role);
         }
       }
-      tag(primary, "primary"); tag(secondary, "secondary"); tag(finalized, "finalized");
+      tag(primaryResolved, "primary"); tag(secondaryResolved, "secondary"); tag(finalizedResolved, "finalized");
 
       const course = String(row.Course);
       const topicName = String(row.Topic).trim();
@@ -149,7 +256,7 @@ function buildTopics(masterRowsByYear, roster) {
 
       topics.push({
         topicId, academicYear: year, course, topicName,
-        primaryInstructorNames: primary, secondaryInstructorNames: secondary, finalizedInstructorNames: finalized,
+        primaryInstructorNames: primaryResolved, secondaryInstructorNames: secondaryResolved, finalizedInstructorNames: finalizedResolved,
         assignedInstructorIDs: Array.from(assignedInstructorIDs), instructorRoles: roles,
         outcomes: [], completionStatus: "not_started", activityHistory: [],
       });
@@ -170,22 +277,17 @@ async function uploadInBatches(collectionName, docs, idField, onProgress) {
 }
 
 /**
- * Single entry point: receives the two <input type="file"> elements, processes
- * everything, and uploads it to Firestore. onProgress(message) keeps the UI informed.
+ * mappings: { [rawText]: chosenFullInstructorName_or_empty_string }
+ * An empty string / missing entry means "keep this raw name as its
+ * own new instructor" (created with no email).
  */
-export async function importFromExcelFiles(masterListFile, emailsListFile, onProgress = () => {}) {
-  onProgress("Reading the master list...");
-  const masterRowsByYear = await readAllSheets(masterListFile);
-
-  onProgress("Reading the email list...");
-  const accessByName = await readAccessList(emailsListFile);
-
-  onProgress("Normalizing instructors...");
-  const roster = buildInstructorRoster(masterRowsByYear, accessByName);
+export async function finalizeImport(masterRowsByYear, accessByName, mappings, onProgress = () => {}) {
+  onProgress("Applying your name mappings...");
+  const { roster, resolve } = buildRoster(masterRowsByYear, accessByName, mappings);
   const instructors = Array.from(roster.values());
 
-  onProgress("Normalizing topics...");
-  const { topics, excludedCount } = buildTopics(masterRowsByYear, roster);
+  onProgress("Building topics...");
+  const { topics, excludedCount } = buildTopics(masterRowsByYear, roster, resolve);
 
   onProgress(`Uploading ${instructors.length} instructors...`);
   await uploadInBatches("instructors", instructors, "instructorId", (done, total) => onProgress(`Instructors: ${done}/${total}`));
