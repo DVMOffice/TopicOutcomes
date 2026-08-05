@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mi Panel — Learning Outcomes</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <h1>Learning Outcomes</h1>
+    <div class="flex gap-4">
+      <span id="welcome-msg"></span>
+      <button class="btn btn-secondary" id="btn-logout">Salir</button>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div class="card mb-4">
+      <div class="flex-between">
+        <div>
+          <h2 id="year-label">Año académico</h2>
+          <p class="text-muted" id="progress-summary"></p>
+        </div>
+        <div style="width: 220px;">
+          <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Mis cursos y temas asignados</h2>
+    <div id="course-accordion"></div>
+  </div>
+
+  <!-- Lógica de esta página: leer mis temas y mostrarlos agrupados por curso.
+       Identidad (quién soy) -> app.js. Datos de temas/progreso -> dataEngine.js -->
+  <script type="module">
+    import { onAuthChange, logOut, getCurrentInstructor } from "./app.js";
+    import { getTopicsForInstructor, summarizeInstructorProgress, topicPercent } from "./dataEngine.js";
+
+    const $ = (id) => document.getElementById(id);
+
+    $("btn-logout").addEventListener("click", async () => {
+      await logOut();
+      window.location.href = "index.html";
+    });
+
+    function groupByCourse(topics) {
+      const groups = new Map();
+      for (const t of topics) {
+        if (!groups.has(t.course)) groups.set(t.course, []);
+        groups.get(t.course).push(t);
+      }
+      return groups;
+    }
+
+    function renderAccordion(groups) {
+      const container = $("course-accordion");
+      container.innerHTML = "";
+
+      for (const [course, topics] of groups) {
+        const item = document.createElement("div");
+        item.className = "accordion-item";
+        const avgPct = Math.round(topics.reduce((sum, t) => sum + topicPercent(t), 0) / topics.length);
+
+        item.innerHTML = `
+          <div class="accordion-header">
+            <span>Curso ${course} <span class="text-muted">(${topics.length} temas)</span></span>
+            <span class="flex gap-2" style="align-items:center;">
+              <span class="text-muted">${avgPct}%</span>
+              <span class="chevron">▾</span>
+            </span>
+          </div>
+          <div class="accordion-body">
+            ${topics
+              .map(
+                (t) => `
+              <div class="flex-between mt-2">
+                <a href="topic.html?id=${t.id}">${t.topicName}</a>
+                <span class="flex gap-2" style="align-items:center;">
+                  <span class="badge badge-${t.completionStatus.replace("_", "-")}">${t.completionStatus.replace("_", " ")}</span>
+                  <span class="text-muted">${topicPercent(t)}%</span>
+                </span>
+              </div>
+            `
+              )
+              .join("")}
+          </div>
+        `;
+
+        item.querySelector(".accordion-header").addEventListener("click", () => item.classList.toggle("open"));
+        container.appendChild(item);
+      }
+    }
+
+    onAuthChange(async (user) => {
+      if (!user) { window.location.href = "index.html"; return; }
+      const instructor = await getCurrentInstructor(user);
+      if (!instructor) { window.location.href = "index.html"; return; }
+
+      $("welcome-msg").textContent = `Bienvenido/a, ${instructor.name}`;
+
+      const topics = await getTopicsForInstructor(instructor.instructorId);
+      const years = [...new Set(topics.map((t) => t.academicYear))];
+      $("year-label").textContent = years.join(", ") || "Sin temas asignados";
+
+      const summary = summarizeInstructorProgress(topics);
+      $("progress-summary").textContent = `Progreso: ${summary.percent}% — Temas completados: ${summary.complete} / ${summary.total}`;
+      $("progress-fill").style.width = `${summary.percent}%`;
+
+      renderAccordion(groupByCourse(topics));
+    });
+  </script>
+</body>
+</html>

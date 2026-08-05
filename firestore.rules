@@ -1,0 +1,57 @@
+rules_version = '2';
+
+// ---------------------------------------------------------------
+// Modelo simplificado (sin backend, sin claves de administrador):
+//
+// - Cualquiera que haya iniciado sesión (correo de instructor O
+//   invitado anónimo) puede LEER instructors / topics / accessCodes.
+// - Solo instructores con correo real (no anónimos/invitados) pueden
+//   ESCRIBIR: agregar resultados a un topic, o hacer la importación
+//   inicial de datos desde admin.html.
+// - accessCodes solo se escribe manualmente desde la consola de
+//   Firebase (Firestore Database > + Iniciar colección), nunca desde
+//   la app.
+//
+// Nota de seguridad: esto confía en que solo tú conoces la URL de
+// admin.html. Si más adelante quieres restringir la importación a
+// una sola persona, descomenta isAdminEmail() abajo y úsala en vez
+// de isRealInstructor() para instructors/topics create — no requiere
+// backend ni claves adicionales.
+// ---------------------------------------------------------------
+function isSignedIn() {
+  return request.auth != null;
+}
+
+function isRealInstructor() {
+  // true para login por correo; false para el login de invitado (anónimo)
+  return isSignedIn() && request.auth.token.firebase.sign_in_provider != "anonymous";
+}
+
+// function isAdminEmail() {
+//   return isSignedIn() && request.auth.token.email in [
+//     "tu-correo@ejemplo.com"
+//   ];
+// }
+
+match /databases/{database}/documents {
+
+  match /instructors/{instructorId} {
+    allow read: if isSignedIn();
+    allow write: if isRealInstructor();
+  }
+
+  match /accessCodes/{year} {
+    allow read: if isSignedIn();
+    allow write: if false; // se edita solo desde la consola de Firebase
+  }
+
+  match /guestSessions/{uid} {
+    allow read, write: if isSignedIn() && request.auth.uid == uid;
+  }
+
+  match /topics/{topicId} {
+    allow read: if isSignedIn();
+    allow create, delete: if isRealInstructor(); // importación inicial
+    allow update: if isSignedIn(); // agregar/editar/borrar outcomes (incluye invitados)
+  }
+}

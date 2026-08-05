@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tema — Learning Outcomes</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <h1>Learning Outcomes</h1>
+    <a href="dashboard.html" style="color:#fff;">← Volver a mi panel</a>
+  </div>
+
+  <div class="main-content">
+    <div class="card mb-4">
+      <span class="text-muted" id="topic-breadcrumb"></span>
+      <h2 id="topic-title">Cargando...</h2>
+      <span class="badge" id="topic-status-badge"></span>
+    </div>
+
+    <div style="display:grid; grid-template-columns: 2fr 1fr; gap: 24px;">
+      <div class="card">
+        <h3>Resultados de aprendizaje (mínimo 6, máximo 8)</h3>
+        <div id="outcomes-list"></div>
+
+        <div class="form-group mt-4" id="new-outcome-form">
+          <label for="new-outcome-text">Nuevo resultado de aprendizaje</label>
+          <textarea id="new-outcome-text" placeholder="Los estudiantes serán capaces de..."></textarea>
+          <button class="btn btn-primary mt-2" id="btn-add-outcome">+ Agregar resultado</button>
+          <p id="outcome-msg" class="text-muted mt-2"></p>
+        </div>
+      </div>
+
+      <div>
+        <div class="card mb-4">
+          <h3>Colaboradores</h3>
+          <div id="collaborators-list"></div>
+        </div>
+        <div class="card">
+          <h3>Actividad reciente</h3>
+          <div id="activity-feed"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lógica de esta página: outcomes compartidos en tiempo real.
+       Identidad -> app.js. Todo lo de outcomes/actividad -> dataEngine.js -->
+  <script type="module">
+    import { onAuthChange, getCurrentInstructor, getAllInstructors } from "./app.js";
+    import { listenToTopic, addOutcome, updateOutcome, deleteOutcome } from "./dataEngine.js";
+
+    const $ = (id) => document.getElementById(id);
+    const topicId = new URLSearchParams(window.location.search).get("id");
+
+    let currentInstructor = null;
+    let unsubscribe = null;
+
+    function timeAgo(ts) {
+      if (!ts) return "";
+      const date = typeof ts.toDate === "function" ? ts.toDate() : new Date(ts);
+      const diffMin = Math.round((Date.now() - date.getTime()) / 60000);
+      if (diffMin < 1) return "justo ahora";
+      if (diffMin < 60) return `hace ${diffMin} min`;
+      const diffH = Math.round(diffMin / 60);
+      if (diffH < 24) return `hace ${diffH} h`;
+      return date.toLocaleDateString();
+    }
+
+    function renderOutcomes(topic) {
+      const list = $("outcomes-list");
+      const outcomes = topic.outcomes || [];
+      list.innerHTML = outcomes
+        .map(
+          (o) => `
+        <div class="outcome-item">
+          <strong>Resultado ${o.outcomeNumber}</strong>
+          <p class="mt-1">${o.text}</p>
+          <div class="outcome-meta">Agregado por ${o.createdByName} · Actualizado por ${o.updatedByName} (${timeAgo(o.updatedAt)})</div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-secondary edit-outcome" data-num="${o.outcomeNumber}">Editar</button>
+            <button class="btn btn-danger delete-outcome" data-num="${o.outcomeNumber}">Eliminar</button>
+          </div>
+        </div>
+      `
+        )
+        .join("");
+
+      list.querySelectorAll(".edit-outcome").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const num = Number(btn.dataset.num);
+          const current = outcomes.find((o) => o.outcomeNumber === num);
+          const text = window.prompt("Editar resultado:", current.text);
+          if (text === null) return;
+          await updateOutcome(topicId, num, { text, instructorId: currentInstructor.instructorId, instructorName: currentInstructor.name });
+        });
+      });
+
+      list.querySelectorAll(".delete-outcome").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!window.confirm("¿Eliminar este resultado de aprendizaje?")) return;
+          await deleteOutcome(topicId, Number(btn.dataset.num), { instructorId: currentInstructor.instructorId, instructorName: currentInstructor.name });
+        });
+      });
+
+      $("new-outcome-form").style.display = outcomes.length >= 8 ? "none" : "block";
+    }
+
+    function renderActivity(topic) {
+      const history = topic.activityHistory || [];
+      $("activity-feed").innerHTML =
+        history.map((a) => `<div class="activity-item"><strong>${a.instructorName}</strong>&nbsp;${a.action} · <span class="text-muted">${timeAgo(a.timestamp)}</span></div>`).join("") ||
+        `<p class="text-muted">Sin actividad todavía.</p>`;
+    }
+
+    async function renderCollaborators(topic) {
+      const all = await getAllInstructors();
+      const byId = new Map(all.map((i) => [i.instructorId, i]));
+      const names = (topic.assignedInstructorIDs || []).map((id) => byId.get(id)?.name || id);
+      $("collaborators-list").innerHTML = names.map((n) => `<div>${n}</div>`).join("");
+    }
+
+    function renderHeader(topic) {
+      $("topic-breadcrumb").textContent = `${topic.academicYear} · Curso ${topic.course}`;
+      $("topic-title").textContent = topic.topicName;
+      const badge = $("topic-status-badge");
+      badge.textContent = topic.completionStatus.replace("_", " ");
+      badge.className = `badge badge-${topic.completionStatus.replace("_", "-")}`;
+    }
+
+    $("btn-add-outcome").addEventListener("click", async () => {
+      const text = $("new-outcome-text").value.trim();
+      if (!text) return;
+      $("outcome-msg").textContent = "Guardando...";
+      try {
+        await addOutcome(topicId, { text, instructorId: currentInstructor.instructorId, instructorName: currentInstructor.name });
+        $("new-outcome-text").value = "";
+        $("outcome-msg").textContent = "";
+      } catch (err) {
+        $("outcome-msg").textContent = err.message;
+      }
+    });
+
+    onAuthChange(async (user) => {
+      if (!user || !topicId) { window.location.href = "index.html"; return; }
+      currentInstructor = await getCurrentInstructor(user);
+      if (!currentInstructor) { window.location.href = "index.html"; return; }
+
+      if (unsubscribe) unsubscribe();
+      unsubscribe = listenToTopic(topicId, (topic) => {
+        renderHeader(topic);
+        renderOutcomes(topic);
+        renderActivity(topic);
+        renderCollaborators(topic);
+      });
+    });
+  </script>
+</body>
+</html>
