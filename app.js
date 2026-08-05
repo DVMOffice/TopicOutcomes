@@ -1,14 +1,14 @@
 /**
  * app.js
  * ---------------------------------------------------------------
- * Todo lo relacionado con "quién soy" vive aquí:
- *   - Login por correo (enlace mágico, sin contraseña ni PIN)
- *   - Login de invitado (código de año académico + búsqueda de nombre)
- *   - Sesión actual / cerrar sesión
- *   - Búsquedas y lecturas de instructores
+ * Everything related to "who am I" lives here:
+ *   - Email login (magic link, no password, no PIN)
+ *   - Guest login (academic-year code + name search)
+ *   - Current session / sign out
+ *   - Instructor searches and lookups
  *
- * Si necesitas corregir algo del login o de cómo se identifica a un
- * instructor, es AQUÍ, en este único archivo.
+ * If you need to fix anything about login or how an
+ * instructor is identified, do it HERE, in this single file.
  * ---------------------------------------------------------------
  */
 import { auth, db } from "./firebaseConfig.js";
@@ -37,30 +37,30 @@ const ACTION_CODE_SETTINGS = {
 };
 
 // ================================================================
-// LOGIN POR CORREO (enlace mágico)
+// EMAIL LOGIN (magic link)
 // ================================================================
 
-/** Paso 1: envía el enlace, solo si el correo existe en "instructors". */
+/** Step 1: sends the link, only if the email exists in "instructors". */
 export async function requestInstructorLoginLink(email) {
   const normalized = email.trim().toLowerCase();
 
   const q = query(collection(db, "instructors"), where("email", "==", normalized));
   const snap = await getDocs(q);
   if (snap.empty) {
-    throw new Error("No encontramos ese correo en la lista de instructores. Contacta al administrador.");
+    throw new Error("We could not find that email in the instructor list. Contact your administrator.");
   }
 
   await sendSignInLinkToEmail(auth, normalized, ACTION_CODE_SETTINGS);
   window.localStorage.setItem("loginEmail", normalized);
 }
 
-/** Paso 2: llama esto al cargar index.html para completar el login si vienen del enlace. */
+/** Step 2: call this when loading index.html to complete login if arriving from the link. */
 export async function completeInstructorLoginIfNeeded() {
   if (!isSignInWithEmailLink(auth, window.location.href)) return null;
 
   let email = window.localStorage.getItem("loginEmail");
   if (!email) {
-    email = window.prompt("Confirma tu correo para completar el inicio de sesión:");
+    email = window.prompt("Confirm your email to complete sign-in:");
   }
   const result = await signInWithEmailLink(auth, email, window.location.href);
   window.localStorage.removeItem("loginEmail");
@@ -68,15 +68,15 @@ export async function completeInstructorLoginIfNeeded() {
 }
 
 // ================================================================
-// LOGIN DE INVITADO (código de año académico)
+// GUEST LOGIN (academic-year code)
 // ================================================================
 
 export async function validateGuestCode(academicYear, code) {
   const snap = await getDocs(collection(db, "accessCodes"));
   const match = snap.docs.find((d) => d.id === academicYear);
-  if (!match) throw new Error("Año académico no válido.");
+  if (!match) throw new Error("Invalid academic year.");
   if (String(match.data().code).trim() !== String(code).trim()) {
-    throw new Error("Código de acceso incorrecto.");
+    throw new Error("Incorrect access code.");
   }
   return true;
 }
@@ -98,7 +98,7 @@ export function getGuestInstructorId() {
 }
 
 // ================================================================
-// SESIÓN
+// SESSION
 // ================================================================
 
 export function onAuthChange(callback) {
@@ -110,7 +110,7 @@ export async function logOut() {
   await signOut(auth);
 }
 
-/** Resuelve el registro completo del instructor actual (correo o invitado). */
+/** Resolves the full record of the current instructor (email or guest). */
 export async function getCurrentInstructor(user) {
   if (!user) return null;
   if (user.isAnonymous) {
@@ -121,7 +121,7 @@ export async function getCurrentInstructor(user) {
 }
 
 // ================================================================
-// CONSULTAS DE INSTRUCTORES
+// INSTRUCTOR LOOKUPS
 // ================================================================
 
 export async function getInstructorByEmail(email) {
