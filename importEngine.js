@@ -126,16 +126,19 @@ function buildInitialsIndex(accessByName) {
 }
 
 function collectRawNames(masterRowsByYear) {
-  const raw = new Set();
+  // Map: rawName -> array of { year, course, topic } where it appears,
+  // so the admin has context when deciding who a name refers to.
+  const occurrencesByName = new Map();
   for (const year of Object.keys(masterRowsByYear)) {
     for (const row of masterRowsByYear[year]) {
       if (!isRealTopicRow(row)) continue;
       for (const n of [...splitNames(row["Primary Instructor"]), ...splitNames(row["Secondary Instructor"]), ...splitNames(row["Finalized Instructors"])]) {
-        raw.add(n);
+        if (!occurrencesByName.has(n)) occurrencesByName.set(n, []);
+        occurrencesByName.get(n).push({ year, course: String(row.Course), topic: String(row.Topic).trim() });
       }
     }
   }
-  return Array.from(raw);
+  return occurrencesByName;
 }
 
 // ================================================================
@@ -155,7 +158,8 @@ export async function analyzeImport(masterListFile, emailsListFile, onProgress =
   const initialsIndex = buildInitialsIndex(accessByName);
 
   onProgress("Comparing instructor names...");
-  const rawNames = collectRawNames(masterRowsByYear);
+  const occurrencesByName = collectRawNames(masterRowsByYear);
+  const rawNames = Array.from(occurrencesByName.keys());
   const allInstructorNames = Array.from(accessByName.values()).map((a) => a.name).sort();
 
   const reviewItems = [];
@@ -167,14 +171,19 @@ export async function analyzeImport(masterListFile, emailsListFile, onProgress =
       const candidates = initialsIndex.get(raw.trim().toUpperCase()) || [];
       suggestions = candidates.map((c) => c.name);
     }
-    reviewItems.push({ rawText: raw, suggestions });
+
+    const occ = occurrencesByName.get(raw) || [];
+    const occurrenceCount = occ.length;
+    const occurrenceSample = occ.slice(0, 5).map((o) => `${o.year} · Course ${o.course} · ${o.topic}`);
+
+    reviewItems.push({ rawText: raw, suggestions, occurrenceCount, occurrenceSample });
   }
 
   return {
     masterRowsByYear,
     accessByName,
     allInstructorNames,
-    reviewItems,           // [{ rawText: "CK", suggestions: ["Cameron Knight"] }, ...]
+    reviewItems,           // [{ rawText: "CK", suggestions: [...], occurrenceCount, occurrenceSample }, ...]
     autoMatchedCount: rawNames.length - reviewItems.length,
     totalRawNames: rawNames.length,
   };
@@ -188,41 +197,50 @@ function buildRoster(masterRowsByYear, accessByName, mappings) {
   const roster = new Map();
   let counter = 1;
 
-  function resolve(rawName) {
+  // Returns an ARRAY of identities — usually one, but can be more than
+  // one if the admin mapped a raw name (e.g. "Combined") to multiple
+  // real instructors.
+  function resolveMulti(rawName) {
     const exact = accessByName.get(normalizeNameKey(rawName));
-    if (exact) return exact;
-    const mapped = mappings[rawName]; // full instructor name chosen by the admin, or "" / undefined = keep as new
-    if (mapped && accessByName.has(normalizeNameKey(mapped))) return accessByName.get(normalizeNameKey(mapped));
-    return { name: rawName, email: "", active: true };
+    if (exact) return [exact];
+    const mapped = mappings[rawName]; // array of full instructor names chosen by the admin, or [] / undefined = keep as new
+    if (Array.isArray(mapped) && mapped.length > 0) {
+      const resolved = mapped
+        .map((name) => accessByName.get(normalizeNameKey(name)))
+        .filter(Boolean);
+      if (resolved.length > 0) return resolved;
+    }
+    return [{ name: rawName, email: "", active: true }];
   }
 
-  function ensure(rawName) {
-    const identity = resolve(rawName);
-    const key = normalizeNameKey(identity.name);
-    if (roster.has(key)) return roster.get(key);
-    const id = `I${String(counter++).padStart(3, "0")}`;
-    const record = {
-      instructorId: id,
-      name: identity.name,
-      email: identity.email || "",
-      accessType: identity.email ? "email" : "guest",
-      active: identity.email ? identity.active : true,
-    };
-    roster.set(key, record);
-    return record;
+  function ensureAll(rawName) {
+    return resolveMulti(rawName).map((identity) => {
+      const key = normalizeNameKey(identity.name);
+      if (roster.has(key)) return roster.get(key);
+      const id = `I${String(counter++).padStart(3, "0")}`;
+      const record = {
+        instructorId: id,
+        name: identity.name,
+        email: identity.email || "",
+        accessType: identity.email ? "email" : "guest",
+        active: identity.email ? identity.active : true,
+      };
+      roster.set(key, record);
+      return record;
+    });
   }
 
   for (const year of Object.keys(masterRowsByYear)) {
     for (const row of masterRowsByYear[year]) {
       if (!isRealTopicRow(row)) continue;
       const names = new Set([...splitNames(row["Primary Instructor"]), ...splitNames(row["Secondary Instructor"]), ...splitNames(row["Finalized Instructors"])]);
-      for (const n of names) ensure(n);
+      for (const n of names) ensureAll(n);
     }
   }
-  return { roster, resolve };
+  return { roster, resolveMulti };
 }
 
-function buildTopics(masterRowsByYear, roster, resolve) {
+function buildTopics(masterRowsByYear, roster, resolveMulti) {
   const topics = [];
   let excludedCount = 0;
   const counters = new Map();
@@ -237,9 +255,10 @@ function buildTopics(masterRowsByYear, roster, resolve) {
       const roles = {};
       const assignedInstructorIDs = new Set();
 
-      const primaryResolved = primary.map((n) => resolve(n).name);
-      const secondaryResolved = secondary.map((n) => resolve(n).name);
-      const finalizedResolved = finalized.map((n) => resolve(n).name);
+      // Each raw name can resolve to multiple real instructors now.
+      const primaryResolved = primary.flatMap((n) => resolveMulti(n).map((i) => i.name));
+      const secondaryResolved = secondary.flatMap((n) => resolveMulti(n).map((i) => i.name));
+      const finalizedResolved = finalized.flatMap((n) => resolveMulti(n).map((i) => i.name));
 
       function tag(resolvedNames, role) {
         for (const n of resolvedNames) {
@@ -282,17 +301,17 @@ async function uploadInBatches(collectionName, docs, idField, onProgress) {
 }
 
 /**
- * mappings: { [rawText]: chosenFullInstructorName_or_empty_string }
- * An empty string / missing entry means "keep this raw name as its
- * own new instructor" (created with no email).
+ * mappings: { [rawText]: string[] } — the instructor full name(s) the
+ * admin chose for that raw text. An empty array / missing entry means
+ * "keep this raw name as its own new instructor" (created with no email).
  */
 export async function finalizeImport(masterRowsByYear, accessByName, mappings, onProgress = () => {}) {
   onProgress("Applying your name mappings...");
-  const { roster, resolve } = buildRoster(masterRowsByYear, accessByName, mappings);
+  const { roster, resolveMulti } = buildRoster(masterRowsByYear, accessByName, mappings);
   const instructors = Array.from(roster.values());
 
   onProgress("Building topics...");
-  const { topics, excludedCount } = buildTopics(masterRowsByYear, roster, resolve);
+  const { topics, excludedCount } = buildTopics(masterRowsByYear, roster, resolveMulti);
 
   onProgress(`Uploading ${instructors.length} instructors...`);
   await uploadInBatches("instructors", instructors, "instructorId", (done, total) => onProgress(`Instructors: ${done}/${total}`));
