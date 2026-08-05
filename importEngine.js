@@ -72,7 +72,7 @@ function readWorkbook(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        resolve(XLSX.read(e.target.result, { type: "array" }));
+        resolve(XLSX.read(e.target.result, { type: "array", sheetRows: 5000 }));
       } catch (err) {
         reject(err);
       }
@@ -86,7 +86,12 @@ async function readAllSheets(file) {
   const wb = await readWorkbook(file);
   const out = {};
   for (const sheetName of wb.SheetNames) {
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: "" });
+    // Some spreadsheets report a huge used-range (thousands of blank
+    // formatted columns/rows) even though the real data is a small
+    // corner of the sheet. Without bounding the range, parsing that
+    // full reported range can freeze the browser tab. Our real data
+    // never goes past column P or row 3000, so we cap it there.
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: "", range: "A1:P3000" });
     out[sheetName] = rows.map((r) => ({
       Week: r["Week"], "Date Range": r["Date Range"], Course: r["Course"], Type: r["Type"], Topic: r["Topic"],
       "Primary Instructor": r["Primary Instructor"], "Secondary Instructor": r["Secondary Instructor"], "Finalized Instructors": r["Finalized Instructors"],
@@ -97,7 +102,7 @@ async function readAllSheets(file) {
 
 async function readAccessList(file) {
   const wb = await readWorkbook(file);
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "", range: "A1:F2000" });
   const byName = new Map();
   for (const r of rows) {
     const displayName = `${r.name} ${r["last name"]}`.trim();
