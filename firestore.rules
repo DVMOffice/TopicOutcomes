@@ -1,43 +1,62 @@
 rules_version = '2';
 
 // ---------------------------------------------------------------
-// Access model:
+// Access model (no email, no passwords, no PINs):
 //
-// - Anyone signed in (instructor email OR anonymous guest) can READ
-//   instructors / topics / accessCodes.
-// - Only the specific admin emails listed in isAdminEmail() can
-//   WRITE to instructors (create/edit the roster) or CREATE/DELETE
-//   topics — this is what protects the data import in admin.html.
-// - Any signed-in user (including guests) can UPDATE a topic —
-//   that's how instructors add/edit/delete learning outcomes.
-// - accessCodes is only ever written manually from the Firebase
-//   console (Firestore Database > + Start collection), never from
-//   the app.
+// - Everyone signs in anonymously (instructors AND admins) after
+//   typing a code: instructors use their academic-year code,
+//   admins use a separate admin code. Neither code is ever
+//   readable by the client directly — Firestore rules compare the
+//   code the client submits against the real one internally.
 //
-// To add or remove an administrator, just edit the email list below
-// and republish these rules — no backend, no extra keys needed.
+// - Anyone signed in can READ instructors / topics / accessCodes.
+// - Anyone signed in can UPDATE a topic (add/edit/delete outcomes) —
+//   that's normal instructor collaboration.
+// - Only someone who successfully validated the admin code (which
+//   creates an adminSessions/{uid} document) can WRITE to
+//   instructors, or CREATE/DELETE topics — this protects bulk
+//   import/management in admin.html.
+//
+// To change the admin code or the per-year codes, edit them
+// directly in Firestore Database > Data (adminAccess/main and
+// accessCodes/{year}) — no redeploy needed.
 // ---------------------------------------------------------------
 function isSignedIn() {
   return request.auth != null;
 }
 
-function isAdminEmail() {
-  return isSignedIn() && request.auth.token.email in [
-    "elsa.sanchez@ucalgary.ca",
-    "karen.schale@ucalgary.ca"
-  ];
+function isAdmin() {
+  return isSignedIn() &&
+    exists(/databases/$(database)/documents/adminSessions/$(request.auth.uid));
 }
 
 match /databases/{database}/documents {
 
   match /instructors/{instructorId} {
     allow read: if isSignedIn();
-    allow write: if isAdminEmail();
+    allow write: if isAdmin();
   }
 
   match /accessCodes/{year} {
     allow read: if isSignedIn();
     allow write: if false; // edited only from the Firebase console
+  }
+
+  match /adminAccess/{docId} {
+    allow read: if false;  // never readable by clients directly
+    allow write: if false; // edited only from the Firebase console
+  }
+
+  match /adminSessions/{uid} {
+    allow read: if isSignedIn() && request.auth.uid == uid;
+    // Self-registers as admin ONLY if the code submitted matches the
+    // real one stored in adminAccess/main. The client never gets to
+    // read that real value — this comparison happens server-side.
+    allow create: if isSignedIn() && request.auth.uid == uid
+      && request.resource.data.codeProvided ==
+         get(/databases/$(database)/documents/adminAccess/main).data.code;
+    allow update: if false;
+    allow delete: if isSignedIn() && request.auth.uid == uid; // allows "log out of admin"
   }
 
   match /guestSessions/{uid} {
@@ -46,7 +65,7 @@ match /databases/{database}/documents {
 
   match /topics/{topicId} {
     allow read: if isSignedIn();
-    allow create, delete: if isAdminEmail(); // bulk import / admin only
-    allow update: if isSignedIn(); // add/edit/delete outcomes (includes guests)
+    allow create, delete: if isAdmin(); // bulk import / admin only
+    allow update: if isSignedIn();      // add/edit/delete outcomes
   }
 }
