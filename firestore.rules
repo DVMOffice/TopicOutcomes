@@ -1,35 +1,35 @@
 rules_version = '2';
 
 // ---------------------------------------------------------------
-// Modelo simplificado (sin backend, sin claves de administrador):
+// Simplified model (no backend, no admin service account keys):
 //
-// - Cualquiera que haya iniciado sesión (correo de instructor O
-//   invitado anónimo) puede LEER instructors / topics / accessCodes.
-// - Solo instructores con correo real (no anónimos/invitados) pueden
-//   ESCRIBIR: agregar resultados a un topic, o hacer la importación
-//   inicial de datos desde admin.html.
-// - accessCodes solo se escribe manualmente desde la consola de
-//   Firebase (Firestore Database > + Iniciar colección), nunca desde
-//   la app.
+// - Anyone signed in (instructor email OR anonymous guest) can READ
+//   instructors / topics / accessCodes.
+// - Only instructors with a real email (not anonymous/guests) can
+//   WRITE: adding outcomes to a topic, or doing the initial data
+//   import from admin.html.
+// - accessCodes is only ever written manually from the Firebase
+//   console (Firestore Database > + Start collection), never from
+//   the app.
 //
-// Nota de seguridad: esto confía en que solo tú conoces la URL de
-// admin.html. Si más adelante quieres restringir la importación a
-// una sola persona, descomenta isAdminEmail() abajo y úsala en vez
-// de isRealInstructor() para instructors/topics create — no requiere
-// backend ni claves adicionales.
+// Security note: this trusts that only you know the URL of
+// admin.html. If later you want to restrict importing to a single
+// person, uncomment isAdminEmail() below and use it instead of
+// isRealInstructor() for instructors/topics create — no backend or
+// extra keys required.
 // ---------------------------------------------------------------
 function isSignedIn() {
   return request.auth != null;
 }
 
 function isRealInstructor() {
-  // true para login por correo; false para el login de invitado (anónimo)
+  // true for email login; false for guest (anonymous) login
   return isSignedIn() && request.auth.token.firebase.sign_in_provider != "anonymous";
 }
 
 // function isAdminEmail() {
 //   return isSignedIn() && request.auth.token.email in [
-//     "tu-correo@ejemplo.com"
+//     "your-email@example.com"
 //   ];
 // }
 
@@ -42,7 +42,7 @@ match /databases/{database}/documents {
 
   match /accessCodes/{year} {
     allow read: if isSignedIn();
-    allow write: if false; // se edita solo desde la consola de Firebase
+    allow write: if false; // edited only from the Firebase console
   }
 
   match /guestSessions/{uid} {
@@ -51,7 +51,7 @@ match /databases/{database}/documents {
 
   match /topics/{topicId} {
     allow read: if isSignedIn();
-    allow create, delete: if isRealInstructor(); // importación inicial
-    allow update: if isSignedIn(); // agregar/editar/borrar outcomes (incluye invitados)
+    allow create, delete: if isRealInstructor(); // initial import
+    allow update: if isSignedIn(); // add/edit/delete outcomes (includes guests)
   }
 }
