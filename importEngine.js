@@ -1,23 +1,24 @@
 /**
  * importEngine.js
  * ---------------------------------------------------------------
- * Importación de datos DIRECTO DESDE EL NAVEGADOR, sin Node, sin
- * terminal. El administrador sube los dos Excel en admin.html, este
- * archivo los lee con SheetJS (cargado por CDN en el HTML), los
- * normaliza igual que antes, y escribe todo a Firestore usando el
- * SDK del navegador (writeBatch) — exactamente como una query normal.
+ * Data import DIRECTLY FROM THE BROWSER, no Node, no
+ * terminal. The administrator uploads the two Excel files in
+ * admin.html, this file reads them with SheetJS (loaded via CDN in
+ * the HTML), normalizes them the same way as before, and writes
+ * everything to Firestore using the browser SDK (writeBatch) —
+ * exactly like a normal query.
  *
- * Requiere que el usuario actual tenga el custom claim admin:true
- * (ver FIREBASE_SETUP.md), porque firestore.rules solo deja escribir
- * en "instructors" y "topics" a administradores.
+ * Requires that the current user is a real instructor (signed in
+ * with email, not a guest) — see firestore.rules, which only allows
+ * writes to "instructors" and "topics" from non-anonymous users.
  * ---------------------------------------------------------------
  */
 import { db } from "./firebaseConfig.js";
 import { collection, doc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-// Requiere que admin.html incluya:
+// Requires admin.html to include:
 // <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-// (esto crea la variable global `XLSX` que usamos abajo)
+// (this creates the global XLSX variable used below)
 
 const EXCLUDED_TYPES = new Set(["LAB", "QUIZ/MIDTERM", "MIDTERM", "EXAM", "FINAL EXAM", "PRACTICAL EXAM", "PRACTICAL", "REVIEW", "REVIEW SESSION", "0"]);
 const EXCLUDED_TOPIC_KEYWORDS = ["lunch", "holiday", "orientation camp", "labour day", "midterm", "final exam", "practical exam", "review session", "study day", "reading week"];
@@ -47,7 +48,7 @@ function slugify(str) {
   return String(str).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 60);
 }
 
-/** Lee un <input type="file"> y devuelve el workbook de SheetJS. */
+/** Reads an <input type="file"> and returns the SheetJS workbook. */
 function readWorkbook(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -169,28 +170,28 @@ async function uploadInBatches(collectionName, docs, idField, onProgress) {
 }
 
 /**
- * Punto de entrada único: recibe los dos <input type="file">, procesa
- * todo y sube a Firestore. onProgress(mensaje) para ir informando a la UI.
+ * Single entry point: receives the two <input type="file"> elements, processes
+ * everything, and uploads it to Firestore. onProgress(message) keeps the UI informed.
  */
 export async function importFromExcelFiles(masterListFile, emailsListFile, onProgress = () => {}) {
-  onProgress("Leyendo la lista maestra...");
+  onProgress("Reading the master list...");
   const masterRowsByYear = await readAllSheets(masterListFile);
 
-  onProgress("Leyendo la lista de correos...");
+  onProgress("Reading the email list...");
   const accessByName = await readAccessList(emailsListFile);
 
-  onProgress("Normalizando instructores...");
+  onProgress("Normalizing instructors...");
   const roster = buildInstructorRoster(masterRowsByYear, accessByName);
   const instructors = Array.from(roster.values());
 
-  onProgress("Normalizando temas...");
+  onProgress("Normalizing topics...");
   const { topics, excludedCount } = buildTopics(masterRowsByYear, roster);
 
-  onProgress(`Subiendo ${instructors.length} instructores...`);
-  await uploadInBatches("instructors", instructors, "instructorId", (done, total) => onProgress(`Instructores: ${done}/${total}`));
+  onProgress(`Uploading ${instructors.length} instructors...`);
+  await uploadInBatches("instructors", instructors, "instructorId", (done, total) => onProgress(`Instructors: ${done}/${total}`));
 
-  onProgress(`Subiendo ${topics.length} temas...`);
-  await uploadInBatches("topics", topics, "topicId", (done, total) => onProgress(`Temas: ${done}/${total}`));
+  onProgress(`Uploading ${topics.length} topics...`);
+  await uploadInBatches("topics", topics, "topicId", (done, total) => onProgress(`Topics: ${done}/${total}`));
 
   return {
     totalInstructors: instructors.length,
