@@ -1,17 +1,17 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Mi Panel — Learning Outcomes</title>
+<title>UCVM Learning Outcomes — My Dashboard</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="topbar">
-    <h1>Learning Outcomes</h1>
+    <h1>UCVM Learning Outcomes</h1>
     <div class="flex gap-4">
       <span id="welcome-msg"></span>
-      <button class="btn btn-secondary" id="btn-logout">Salir</button>
+      <button class="btn btn-secondary" id="btn-logout">Log out</button>
     </div>
   </div>
 
@@ -19,7 +19,7 @@
     <div class="card mb-4">
       <div class="flex-between">
         <div>
-          <h2 id="year-label">Año académico</h2>
+          <h2 id="year-label">Academic year</h2>
           <p class="text-muted" id="progress-summary"></p>
         </div>
         <div style="width: 220px;">
@@ -28,12 +28,12 @@
       </div>
     </div>
 
-    <h2>Mis cursos y temas asignados</h2>
+    <h2>My assigned courses and topics</h2>
     <div id="course-accordion"></div>
   </div>
 
-  <!-- Lógica de esta página: leer mis temas y mostrarlos agrupados por curso.
-       Identidad (quién soy) -> app.js. Datos de temas/progreso -> dataEngine.js -->
+  <!-- Logic for this page: read my topics and show them grouped by course.
+       Identity (who am I) -> app.js. Topic/progress data -> dataEngine.js -->
   <script type="module">
     import { onAuthChange, logOut, getCurrentInstructor } from "./app.js";
     import { getTopicsForInstructor, summarizeInstructorProgress, topicPercent } from "./dataEngine.js";
@@ -65,7 +65,7 @@
 
         item.innerHTML = `
           <div class="accordion-header">
-            <span>Curso ${course} <span class="text-muted">(${topics.length} temas)</span></span>
+            <span>Course ${course} <span class="text-muted">(${topics.length} topics)</span></span>
             <span class="flex gap-2" style="align-items:center;">
               <span class="text-muted">${avgPct}%</span>
               <span class="chevron">▾</span>
@@ -98,14 +98,14 @@
       const instructor = await getCurrentInstructor(user);
       if (!instructor) { window.location.href = "index.html"; return; }
 
-      $("welcome-msg").textContent = `Bienvenido/a, ${instructor.name}`;
+      $("welcome-msg").textContent = `Welcome, ${instructor.name}`;
 
       const topics = await getTopicsForInstructor(instructor.instructorId);
       const years = [...new Set(topics.map((t) => t.academicYear))];
-      $("year-label").textContent = years.join(", ") || "Sin temas asignados";
+      $("year-label").textContent = years.join(", ") || "No topics assigned";
 
       const summary = summarizeInstructorProgress(topics);
-      $("progress-summary").textContent = `Progreso: ${summary.percent}% — Temas completados: ${summary.complete} / ${summary.total}`;
+      $("progress-summary").textContent = `Progress: ${summary.percent}% — Topics completed: ${summary.complete} / ${summary.total}`;
       $("progress-fill").style.width = `${summary.percent}%`;
 
       renderAccordion(groupByCourse(topics));
