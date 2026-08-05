@@ -49,13 +49,14 @@ match /databases/{database}/documents {
 
   match /adminSessions/{uid} {
     allow read: if isSignedIn() && request.auth.uid == uid;
-    // Self-registers as admin ONLY if the code submitted matches the
-    // real one stored in adminAccess/main. The client never gets to
-    // read that real value — this comparison happens server-side.
-    allow create: if isSignedIn() && request.auth.uid == uid
+    // Both the first time (create) AND re-entering the code later on
+    // the same device (update, since the doc already exists) require
+    // the code to match. Without covering update too, a second correct
+    // attempt on a device that already has a session would be wrongly
+    // rejected.
+    allow create, update: if isSignedIn() && request.auth.uid == uid
       && request.resource.data.codeProvided ==
          get(/databases/$(database)/documents/adminAccess/main).data.code;
-    allow update: if false;
     allow delete: if isSignedIn() && request.auth.uid == uid; // allows "log out of admin"
   }
 
