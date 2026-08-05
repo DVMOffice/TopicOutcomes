@@ -69,11 +69,14 @@ const firebaseConfig = {
 2. Delete the existing content and paste the **`firestore.rules`** file (project root).
 3. Click **Publish**.
 
-These rules don't require admin custom claims: any instructor with a real
-email (not a guest) can read/write instructors and topics; guests can only
-add/edit outcomes within an existing topic. If later you want only you to
-be able to import data, open `firestore.rules`, uncomment `isAdminEmail()`
-and add your email — 3 lines, no backend needed.
+These rules don't require admin custom claims or a service account: they
+check `request.auth.token.email` directly against a short list of admin
+emails inside `isAdminEmail()`. Only those emails can import/manage the
+instructor roster and topics; everyone else who's signed in can still
+read everything and add/edit outcomes on their own topics. To change who
+the admins are, edit the email list in `isAdminEmail()` (in this file),
+and also in `ADMIN_EMAILS` inside `app.js` and `admin.html` — then
+republish these rules and re-upload those two files.
 
 ---
 
