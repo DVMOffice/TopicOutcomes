@@ -1,7 +1,7 @@
 # Step-by-step guide: connecting this app to Firebase
 
 Everything is done from the browser — no Node, no terminal, no service
-account keys. Just the Firebase web console.
+account keys, no emails to configure. Just the Firebase web console.
 
 ---
 
@@ -33,7 +33,7 @@ const firebaseConfig = {
 };
 ```
 
-5. **Copy that whole object** and paste it into your **`firebaseConfig.js`** file (project root), replacing the `"REPLACE_..."` placeholder values.
+5. **Copy that whole object** and paste it into your **`firebaseConfig.js`** file (project root), replacing the placeholder values.
 6. Click **"Continue to console"**.
 
 ---
@@ -41,9 +41,11 @@ const firebaseConfig = {
 ## Step 3 — Enable Authentication
 
 1. Left menu: **Build > Authentication** → **Get started**.
-2. **Sign-in method** tab → enable **"Email/Password"**, and within that same card also enable **"Email link (passwordless sign-in)"**.
-3. Also enable **"Anonymous"** (used for guest access).
-4. **Settings > Authorized domains** tab: confirm `localhost` is listed, and add your real domain once you publish (GitHub Pages or Firebase Hosting).
+2. **Sign-in method** tab → enable **only "Anonymous"**. That's the only
+   provider this app uses — access is controlled by codes and by matching
+   emails against the instructor list, not by Firebase's own
+   email/password or magic-link systems.
+3. **Settings > Authorized domains** tab: confirm `localhost` is listed, and add your real domain once you publish (GitHub Pages or Firebase Hosting).
 
 ---
 
@@ -53,11 +55,18 @@ const firebaseConfig = {
 2. Choose the location closest to your users.
 3. **"Start in production mode"** → **Enable**.
 
-### Create the guest access codes
+### Create the academic-year access codes (for instructors without an email on file)
 
 1. **"+ Start collection"** → ID: `accessCodes`.
 2. Document ID: `Year 1` → field `code` (string) → your code, e.g. `UCVM-Y1`.
 3. Repeat for `Year 2` and `Year 3`.
+
+### Create the administrator code
+
+1. **"+ Start collection"** → ID: `adminAccess`.
+2. Document ID: `main` → field `code` (string) → a code only the two of
+   you know, e.g. `UCVM-ADMIN-2026`.
+3. Save.
 
 (`instructors` and `topics` are created automatically once you import your Excel files in Step 6.)
 
@@ -66,17 +75,30 @@ const firebaseConfig = {
 ## Step 5 — Publish the security rules
 
 1. In Firestore, go to the **Rules** tab.
-2. Delete the existing content and paste the **`firestore.rules`** file (project root).
+2. Delete the existing content and paste the **`firestore.rules`** file (project root), wrapped like this:
+
+```
+rules_version = '2';
+
+service cloud.firestore {
+  // ... paste the content of firestore.rules here ...
+}
+```
+
 3. Click **Publish**.
 
-These rules don't require admin custom claims or a service account: they
-check `request.auth.token.email` directly against a short list of admin
-emails inside `isAdminEmail()`. Only those emails can import/manage the
-instructor roster and topics; everyone else who's signed in can still
-read everything and add/edit outcomes on their own topics. To change who
-the admins are, edit the email list in `isAdminEmail()` (in this file),
-and also in `ADMIN_EMAILS` inside `app.js` and `admin.html` — then
-republish these rules and re-upload those two files.
+These rules don't use email, passwords, or admin custom claims. Instead:
+- Any instructor whose email is already in the imported list can sign in
+  instantly by typing it (no proof required — this app trusts convenience
+  over strict identity verification for regular instructors, since they
+  can only edit their own assigned topics).
+- Instructors without an email use the academic-year code.
+- Only whoever knows the **admin code** (Step 4) can import/manage data —
+  Firestore checks the code server-side; the real value is never exposed
+  to the browser.
+
+To change the admin code later, just edit `adminAccess/main` directly in
+the Firestore **Data** tab — no redeploy needed.
 
 ---
 
@@ -91,12 +113,17 @@ python3 -m http.server 5500
 
 Open `http://localhost:5500` in your browser.
 
-1. **Sign in** with a real email that exists in your instructor list.
-2. Go to **`admin.html`**.
+1. On the login screen, click **"Administrator access"** (small link near the bottom) and enter the admin code from Step 4.
+2. You'll land on **`admin.html`**.
 3. In the **"Import data from Excel"** section, upload your two files:
    - `Topicinstructor_master_list.xlsx`
    - `Instructorsemails_list.xlsx`
-4. Click **"Import and upload to Firestore"**. You'll see progress on
+4. Click **"Analyze files"**. Nothing uploads yet — you'll see a list of
+   any instructor names that couldn't be matched automatically (e.g. an
+   initials-only entry like "CK"), each with a dropdown. Pick the right
+   instructor for each one (or leave it as "keep as a new instructor" if
+   that's correct).
+5. Click **"Confirm and import"**. You'll see progress on
    screen (how many instructors, how many topics, how many rows were
    excluded for being labs/exams/lunch/holidays).
 
@@ -129,7 +156,7 @@ firebase deploy
 | Login / identity (shared logic) | `app.js` |
 | Topics, outcomes, and export (shared logic) | `dataEngine.js` |
 | Import your Excel files (shared logic) | `importEngine.js` |
-| Login screen | `index.html` |
+| Login screen (email / year code / admin code) | `index.html` |
 | Instructor dashboard | `dashboard.html` |
 | Topic collaboration | `topic.html` |
 | Admin panel, import and export | `admin.html` |
