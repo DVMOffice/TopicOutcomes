@@ -16,7 +16,7 @@
   <div class="main-content">
     <div class="card mb-4" id="import-section">
       <h3>Import data from Excel</h3>
-      <p class="text-muted">Upload the two original files. Everything is cleaned up and uploaded to Firestore directly from the browser — no installation needed.</p>
+      <p class="text-muted">Upload the two original files. Nothing is uploaded yet — first you'll review any instructor names that couldn't be matched with certainty.</p>
       <div class="form-group mt-2">
         <label for="file-master">Master list (Topicinstructor_master_list.xlsx)</label>
         <input type="file" id="file-master" accept=".xlsx" />
@@ -25,8 +25,16 @@
         <label for="file-emails">Email list (Instructorsemails_list.xlsx)</label>
         <input type="file" id="file-emails" accept=".xlsx" />
       </div>
-      <button class="btn btn-primary" id="btn-import">Import and upload to Firestore</button>
-      <p class="text-muted mt-2" id="import-status"></p>
+      <button class="btn btn-primary" id="btn-analyze">Analyze files</button>
+      <p class="text-muted mt-2" id="analyze-status"></p>
+
+      <div id="review-section" style="display:none;">
+        <hr class="mt-4" />
+        <h3 class="mt-4">Review unmatched names</h3>
+        <div id="review-list"></div>
+        <button class="btn btn-primary mt-4" id="btn-confirm-import">Confirm and import</button>
+        <p class="text-muted mt-2" id="import-status"></p>
+      </div>
     </div>
 
     <div class="card mb-4">
@@ -79,34 +87,90 @@
   <!-- Logic for this page: stats, filters, and export.
        Instructors -> app.js. Topics/filters/export -> dataEngine.js -->
   <script type="module">
-    import { getAllInstructors, onAuthChange } from "./app.js";
+    import { getAllInstructors, onAuthChange, isCurrentUserAdmin } from "./app.js";
     import { getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible } from "./dataEngine.js";
-    import { importFromExcelFiles } from "./importEngine.js";
-
-    // Keep this in sync with the admin email list in firestore.rules.
-    // This is only a UI convenience (hides the import section for
-    // non-admins) — the real security boundary is firestore.rules.
-    const ADMIN_EMAILS = ["elsa.sanchez@ucalgary.ca", "karen.schale@ucalgary.ca"];
+    import { analyzeImport, finalizeImport } from "./importEngine.js";
 
     const $ = (id) => document.getElementById(id);
     let allTopics = [];
     let allInstructors = [];
 
-    $("btn-import").addEventListener("click", async () => {
+    // Holds the result of Step 1 (analyze) until the admin confirms Step 2.
+    let pendingAnalysis = null;
+
+    function renderReviewList(reviewItems) {
+      const list = $("review-list");
+      if (reviewItems.length === 0) {
+        list.innerHTML = `<p class="text-muted">Every name matched automatically — nothing to review.</p>`;
+        return;
+      }
+      list.innerHTML = reviewItems
+        .map((item, idx) => {
+          const options = pendingAnalysis.allInstructorNames
+            .map((name) => {
+              const selected = item.suggestions.length === 1 && item.suggestions[0] === name ? "selected" : "";
+              return `<option value="${name}" ${selected}>${name}</option>`;
+            })
+            .join("");
+          const suggestionNote = item.suggestions.length > 1
+            ? `<span class="text-muted"> — could be: ${item.suggestions.join(" / ")}</span>`
+            : "";
+          return `
+            <div class="form-group">
+              <label>"${item.rawText}"${suggestionNote}</label>
+              <select data-raw="${item.rawText}" class="review-mapping">
+                <option value="">— Keep as a new instructor named "${item.rawText}" (no email) —</option>
+                ${options}
+              </select>
+            </div>
+          `;
+        })
+        .join("");
+    }
+
+    $("btn-analyze").addEventListener("click", async () => {
       const masterFile = $("file-master").files[0];
       const emailsFile = $("file-emails").files[0];
       if (!masterFile || !emailsFile) {
-        $("import-status").textContent = "Select both files first.";
+        $("analyze-status").textContent = "Select both files first.";
         return;
       }
-      $("btn-import").disabled = true;
+      $("btn-analyze").disabled = true;
       try {
-        const result = await importFromExcelFiles(masterFile, emailsFile, (msg) => {
-          $("import-status").textContent = msg;
+        pendingAnalysis = await analyzeImport(masterFile, emailsFile, (msg) => {
+          $("analyze-status").textContent = msg;
         });
+        $("analyze-status").textContent =
+          `${pendingAnalysis.autoMatchedCount} of ${pendingAnalysis.totalRawNames} names matched automatically. ` +
+          `${pendingAnalysis.reviewItems.length} need your review below.`;
+        renderReviewList(pendingAnalysis.reviewItems);
+        $("review-section").style.display = "block";
+      } catch (err) {
+        $("analyze-status").textContent = "Error: " + err.message;
+      } finally {
+        $("btn-analyze").disabled = false;
+      }
+    });
+
+    $("btn-confirm-import").addEventListener("click", async () => {
+      if (!pendingAnalysis) return;
+      const mappings = {};
+      document.querySelectorAll(".review-mapping").forEach((select) => {
+        mappings[select.dataset.raw] = select.value; // "" = keep as new instructor
+      });
+
+      $("btn-confirm-import").disabled = true;
+      try {
+        const result = await finalizeImport(
+          pendingAnalysis.masterRowsByYear,
+          pendingAnalysis.accessByName,
+          mappings,
+          (msg) => { $("import-status").textContent = msg; }
+        );
         $("import-status").textContent =
           `Done: ${result.totalInstructors} instructors (${result.instructorsWithoutEmail} without email), ` +
           `${result.totalTopics} topics imported, ${result.excludedRows} rows excluded (labs/exams/etc.)`;
+
         // Refresh the dashboard with the newly uploaded data
         allTopics = await getAllTopics();
         allInstructors = await getAllInstructors();
@@ -117,7 +181,7 @@
       } catch (err) {
         $("import-status").textContent = "Error: " + err.message;
       } finally {
-        $("btn-import").disabled = false;
+        $("btn-confirm-import").disabled = false;
       }
     });
 
@@ -203,7 +267,7 @@
         return;
       }
 
-      const isAdmin = !user.isAnonymous && ADMIN_EMAILS.includes((user.email || "").toLowerCase());
+      const isAdmin = await isCurrentUserAdmin();
       $("import-section").style.display = isAdmin ? "block" : "none";
 
       allTopics = await getAllTopics();
