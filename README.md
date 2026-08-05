@@ -73,8 +73,18 @@ importing.
 
 ## Security note
 
-The current rules trust that only you know the URL of `admin.html`. Any
-instructor with a real email can technically write to `instructors`/`topics`
-(this is required for the import to work without a backend). If you want
-to restrict importing to a single email address, `firestore.rules` already
-includes a commented-out `isAdminEmail()` function ready to enable.
+Importing/managing the instructor roster and topics (bulk create/delete)
+is restricted to two admin emails, checked server-side by Firestore
+(`isAdminEmail()` in `firestore.rules`) — not just by hiding the
+`admin.html` URL. Anyone can visit `admin.html`, but only those two
+signed-in emails can actually write data; everyone else gets a
+permission-denied error if they try. Regular instructors and guests can
+still add/edit/delete outcomes on topics they're assigned to (that's
+`allow update` on `topics`, open to any signed-in user).
+
+To change who the admins are, edit the email list in both:
+- `firestore.rules` → `isAdminEmail()`
+- `app.js` → `ADMIN_EMAILS` (controls who can request a login link before any data exists)
+- `admin.html` → `ADMIN_EMAILS` (controls whether the import section is shown)
+
+Then republish `firestore.rules` in the Firebase console and re-upload the two JS/HTML files.
