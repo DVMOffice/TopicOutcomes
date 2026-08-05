@@ -36,18 +36,26 @@ const ACTION_CODE_SETTINGS = {
   handleCodeInApp: true,
 };
 
+// Admin emails can always sign in, even before any data has been imported
+// (otherwise nobody could ever request the first import). This is not a
+// security boundary — that's enforced by firestore.rules — it just
+// controls who gets a login link sent before the instructor roster exists.
+const ADMIN_EMAILS = ["elsa.sanchez@ucalgary.ca", "karen.schale@ucalgary.ca"];
+
 // ================================================================
 // EMAIL LOGIN (magic link)
 // ================================================================
 
-/** Step 1: sends the link, only if the email exists in "instructors". */
+/** Step 1: sends the link, only if the email exists in "instructors" — or is an admin email. */
 export async function requestInstructorLoginLink(email) {
   const normalized = email.trim().toLowerCase();
 
-  const q = query(collection(db, "instructors"), where("email", "==", normalized));
-  const snap = await getDocs(q);
-  if (snap.empty) {
-    throw new Error("We could not find that email in the instructor list. Contact your administrator.");
+  if (!ADMIN_EMAILS.includes(normalized)) {
+    const q = query(collection(db, "instructors"), where("email", "==", normalized));
+    const snap = await getDocs(q);
+    if (snap.empty) {
+      throw new Error("We could not find that email in the instructor list. Contact your administrator.");
+    }
   }
 
   await sendSignInLinkToEmail(auth, normalized, ACTION_CODE_SETTINGS);
