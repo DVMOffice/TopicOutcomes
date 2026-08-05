@@ -1,43 +1,38 @@
 rules_version = '2';
 
 // ---------------------------------------------------------------
-// Simplified model (no backend, no admin service account keys):
+// Access model:
 //
 // - Anyone signed in (instructor email OR anonymous guest) can READ
 //   instructors / topics / accessCodes.
-// - Only instructors with a real email (not anonymous/guests) can
-//   WRITE: adding outcomes to a topic, or doing the initial data
-//   import from admin.html.
+// - Only the specific admin emails listed in isAdminEmail() can
+//   WRITE to instructors (create/edit the roster) or CREATE/DELETE
+//   topics — this is what protects the data import in admin.html.
+// - Any signed-in user (including guests) can UPDATE a topic —
+//   that's how instructors add/edit/delete learning outcomes.
 // - accessCodes is only ever written manually from the Firebase
 //   console (Firestore Database > + Start collection), never from
 //   the app.
 //
-// Security note: this trusts that only you know the URL of
-// admin.html. If later you want to restrict importing to a single
-// person, uncomment isAdminEmail() below and use it instead of
-// isRealInstructor() for instructors/topics create — no backend or
-// extra keys required.
+// To add or remove an administrator, just edit the email list below
+// and republish these rules — no backend, no extra keys needed.
 // ---------------------------------------------------------------
 function isSignedIn() {
   return request.auth != null;
 }
 
-function isRealInstructor() {
-  // true for email login; false for guest (anonymous) login
-  return isSignedIn() && request.auth.token.firebase.sign_in_provider != "anonymous";
+function isAdminEmail() {
+  return isSignedIn() && request.auth.token.email in [
+    "elsa.sanchez@ucalgary.ca",
+    "karen.schale@ucalgary.ca"
+  ];
 }
-
-// function isAdminEmail() {
-//   return isSignedIn() && request.auth.token.email in [
-//     "your-email@example.com"
-//   ];
-// }
 
 match /databases/{database}/documents {
 
   match /instructors/{instructorId} {
     allow read: if isSignedIn();
-    allow write: if isRealInstructor();
+    allow write: if isAdminEmail();
   }
 
   match /accessCodes/{year} {
@@ -51,7 +46,7 @@ match /databases/{database}/documents {
 
   match /topics/{topicId} {
     allow read: if isSignedIn();
-    allow create, delete: if isRealInstructor(); // initial import
+    allow create, delete: if isAdminEmail(); // bulk import / admin only
     allow update: if isSignedIn(); // add/edit/delete outcomes (includes guests)
   }
 }
