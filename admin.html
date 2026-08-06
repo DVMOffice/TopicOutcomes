@@ -16,7 +16,7 @@
   <div class="main-content">
     <div class="card mb-4" id="import-section">
       <h3>Import data from Excel</h3>
-      <p class="text-muted">Upload the two original files. Nothing is uploaded yet — first you'll review any instructor names that couldn't be matched with certainty.</p>
+      <p class="text-muted">Upload the two original files and import right away. Names that match confidently link automatically; anything ambiguous imports as a placeholder you can fix later, one topic at a time, in "Review topics" below — nothing blocks the import.</p>
       <div class="form-group mt-2">
         <label for="file-master">Master list (Topicinstructor_master_list.xlsx)</label>
         <input type="file" id="file-master" accept=".xlsx" />
@@ -25,16 +25,8 @@
         <label for="file-emails">Email list (Instructorsemails_list.xlsx)</label>
         <input type="file" id="file-emails" accept=".xlsx" />
       </div>
-      <button class="btn btn-primary" id="btn-analyze">Analyze files</button>
-      <p class="text-muted mt-2" id="analyze-status"></p>
-
-      <div id="review-section" style="display:none;">
-        <hr class="mt-4" />
-        <h3 class="mt-4">Review unmatched names</h3>
-        <div id="review-list"></div>
-        <button class="btn btn-primary mt-4" id="btn-confirm-import">Confirm and import</button>
-        <p class="text-muted mt-2" id="import-status"></p>
-      </div>
+      <button class="btn btn-primary" id="btn-import">Import and upload to Firestore</button>
+      <p class="text-muted mt-2" id="import-status"></p>
     </div>
 
     <div class="card mb-4">
@@ -55,10 +47,11 @@
       <div id="instructor-progress"></div>
     </div>
 
-    <div class="card mb-4" id="fix-section">
-      <h3>Fix unmatched instructors</h3>
-      <p class="text-muted">Instructors created from a name that didn't match anyone during import (no email). Fix them one at a time, whenever you have time — this relinks their topics to the real instructor and removes the placeholder.</p>
-      <div id="fix-list"></div>
+    <div class="card mb-4" id="review-topics-section">
+      <h3>Review topics</h3>
+      <p class="text-muted">Topics where at least one instructor slot couldn't be matched confidently during import. Fix them one at a time, whenever you have time — click "Accept" on a topic to save it; the rest stay here for later. Nothing here blocks the data you already have.</p>
+      <p class="text-muted mt-2" id="review-topics-count"></p>
+      <div id="review-topics-list"></div>
     </div>
 
     <div class="card mb-4">
@@ -94,118 +87,45 @@
        Instructors -> app.js. Topics/filters/export -> dataEngine.js -->
   <script type="module">
     import { getAllInstructors, onAuthChange, isCurrentUserAdmin } from "./app.js";
-    import { getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible, mergeInstructor } from "./dataEngine.js";
-    import { analyzeImport, finalizeImport } from "./importEngine.js";
+    import {
+      getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible,
+      getTopicsNeedingReview, resolveTopicSlot,
+    } from "./dataEngine.js";
+    import { importNow } from "./importEngine.js";
 
     const $ = (id) => document.getElementById(id);
     let allTopics = [];
     let allInstructors = [];
 
-    // Holds the result of Step 1 (analyze) until the admin confirms Step 2.
-    let pendingAnalysis = null;
-
-    function renderReviewList(reviewItems) {
-      const list = $("review-list");
-      if (reviewItems.length === 0) {
-        list.innerHTML = `<p class="text-muted">Every name matched automatically — nothing to review.</p>`;
-        return;
-      }
-
-      // Group visually by raw text so identical labels are easy to scan,
-      // but each occurrence still gets its OWN selector — the same raw
-      // text can mean different people in different topics.
-      const groups = new Map();
-      for (const item of reviewItems) {
-        if (!groups.has(item.rawText)) groups.set(item.rawText, []);
-        groups.get(item.rawText).push(item);
-      }
-
-      const optionsFor = (item) =>
-        pendingAnalysis.allInstructorNames
-          .map((name) => {
-            const selected = item.suggestions.includes(name) ? "selected" : "";
-            return `<option value="${name}" ${selected}>${name}</option>`;
-          })
-          .join("");
-
-      let html = "";
-      for (const [rawText, items] of groups) {
-        html += `<div style="border-bottom:1px solid var(--color-border); padding-bottom:16px; margin-bottom:16px;">`;
-        html += `<label>"${rawText}"</label>`;
-        if (items[0].suggestions.length > 0) {
-          html += `<div class="text-muted mt-1" style="font-size:0.85rem;">Detected: ${items[0].suggestions.join(" / ")} — pre-selected below, adjust per topic if wrong.</div>`;
-        }
-        for (const item of items) {
-          html += `
-            <div class="form-group mt-2" style="margin-left:12px;">
-              <label style="font-weight:400;">${item.year} · Course ${item.course} · ${item.topic} <span class="text-muted">(${item.role})</span></label>
-              <select data-key="${item.key}" class="review-mapping" multiple size="3" style="height:auto;">
-                ${optionsFor(item)}
-              </select>
-            </div>
-          `;
-        }
-        html += `<div class="text-muted mt-1" style="font-size:0.8rem;">Ctrl/Cmd+click to select more than one instructor. Leave nothing selected for a topic to keep "${rawText}" as its own new instructor there (no email).</div>`;
-        html += `</div>`;
-      }
-      list.innerHTML = html;
-    }
-
-    $("btn-analyze").addEventListener("click", async () => {
+    $("btn-import").addEventListener("click", async () => {
       const masterFile = $("file-master").files[0];
       const emailsFile = $("file-emails").files[0];
       if (!masterFile || !emailsFile) {
-        $("analyze-status").textContent = "Select both files first.";
+        $("import-status").textContent = "Select both files first.";
         return;
       }
-      $("btn-analyze").disabled = true;
+      $("btn-import").disabled = true;
       try {
-        pendingAnalysis = await analyzeImport(masterFile, emailsFile, (msg) => {
-          $("analyze-status").textContent = msg;
+        const result = await importNow(masterFile, emailsFile, (msg) => {
+          $("import-status").textContent = msg;
         });
-        $("analyze-status").textContent =
-          `${pendingAnalysis.autoMatchedCount} of ${pendingAnalysis.totalRawNames} name slots matched automatically. ` +
-          `${pendingAnalysis.reviewItems.length} topic occurrences need your review below.`;
-        renderReviewList(pendingAnalysis.reviewItems);
-        $("review-section").style.display = "block";
-      } catch (err) {
-        $("analyze-status").textContent = "Error: " + err.message;
-      } finally {
-        $("btn-analyze").disabled = false;
-      }
-    });
-
-    $("btn-confirm-import").addEventListener("click", async () => {
-      if (!pendingAnalysis) return;
-      const mappings = {};
-      document.querySelectorAll(".review-mapping").forEach((select) => {
-        mappings[select.dataset.key] = Array.from(select.selectedOptions).map((o) => o.value); // [] = keep as new instructor
-      });
-
-      $("btn-confirm-import").disabled = true;
-      try {
-        const result = await finalizeImport(
-          pendingAnalysis.masterRowsByYear,
-          pendingAnalysis.accessByName,
-          mappings,
-          (msg) => { $("import-status").textContent = msg; }
-        );
         $("import-status").textContent =
           `Done: ${result.totalInstructors} instructors (${result.instructorsWithoutEmail} without email), ` +
-          `${result.totalTopics} topics imported, ${result.excludedRows} rows excluded (labs/exams/etc.)`;
+          `${result.totalTopics} topics imported, ${result.excludedRows} rows excluded (labs/exams/etc.), ` +
+          `${result.placeholderSlots} instructor slot(s) need review below.`;
 
         // Refresh the dashboard with the newly uploaded data
         allTopics = await getAllTopics();
         allInstructors = await getAllInstructors();
         renderStats();
         renderInstructorProgress();
-        renderFixList();
+        renderReviewTopics();
         populateFilterOptions();
         refreshPreview();
       } catch (err) {
         $("import-status").textContent = "Error: " + err.message;
       } finally {
-        $("btn-confirm-import").disabled = false;
+        $("btn-import").disabled = false;
       }
     });
 
@@ -250,60 +170,77 @@
         .join("");
     }
 
-    function renderFixList() {
-      const placeholders = allInstructors.filter((i) => !i.email);
+    function renderReviewTopics() {
+      const topicsNeedingReview = getTopicsNeedingReview(allTopics, allInstructors);
       const realInstructors = allInstructors.filter((i) => i.email).sort((a, b) => a.name.localeCompare(b.name));
 
-      if (placeholders.length === 0) {
-        $("fix-list").innerHTML = `<p class="text-muted">Nothing to fix — every instructor has a matched email.</p>`;
+      $("review-topics-count").textContent = `${topicsNeedingReview.length} topic(s) need review.`;
+
+      if (topicsNeedingReview.length === 0) {
+        $("review-topics-list").innerHTML = `<p class="text-muted">Nothing to review — every topic has confidently matched instructors.</p>`;
         return;
       }
 
-      const options = realInstructors.map((i) => `<option value="${i.instructorId}">${i.name}</option>`).join("");
+      const options = realInstructors.map((i) => `<option value="${i.instructorId}" data-name="${i.name}">${i.name}</option>`).join("");
 
-      $("fix-list").innerHTML = placeholders
-        .map((p) => {
-          const topicCount = allTopics.filter((t) => (t.assignedInstructorIDs || []).includes(p.instructorId)).length;
-          return `
-            <div class="form-group flex gap-2" style="align-items:flex-end;">
-              <div style="flex:1;">
-                <label>"${p.name}" <span class="text-muted">(${topicCount} topic${topicCount === 1 ? "" : "s"})</span></label>
-                <select class="fix-mapping" data-old="${p.instructorId}">
-                  <option value="">— choose the real instructor —</option>
-                  ${options}
-                </select>
-              </div>
-              <button class="btn btn-primary fix-merge-btn" data-old="${p.instructorId}">Merge</button>
+      $("review-topics-list").innerHTML = topicsNeedingReview
+        .map((t) => `
+          <div class="accordion-item" data-topic-id="${t.id}">
+            <div class="accordion-header">
+              <span>${t.academicYear} · Course ${t.course} · ${t.topicName}</span>
+              <span class="chevron">▾</span>
             </div>
-          `;
-        })
+            <div class="accordion-body">
+              ${t.placeholderSlots
+                .map(
+                  (slot, i) => `
+                <div class="form-group mt-2">
+                  <label>"${slot.rawName}" <span class="text-muted">(${slot.roles.join(", ")})</span></label>
+                  <select class="topic-review-mapping" data-topic="${t.id}" data-old-id="${slot.instructorId}" data-old-name="${slot.rawName}" multiple size="4" style="height:auto;">
+                    ${options}
+                  </select>
+                  <button class="btn btn-primary mt-2 topic-accept-btn" data-topic="${t.id}" data-old-id="${slot.instructorId}" data-old-name="${slot.rawName}">Accept</button>
+                </div>
+              `
+                )
+                .join("")}
+            </div>
+          </div>
+        `)
         .join("");
 
-      document.querySelectorAll(".fix-merge-btn").forEach((btn) => {
+      document.querySelectorAll("#review-topics-list .accordion-header").forEach((header) => {
+        header.addEventListener("click", () => header.parentElement.classList.toggle("open"));
+      });
+
+      document.querySelectorAll(".topic-accept-btn").forEach((btn) => {
         btn.addEventListener("click", async () => {
-          const oldId = btn.dataset.old;
-          const select = document.querySelector(`.fix-mapping[data-old="${oldId}"]`);
-          const newId = select.value;
-          if (!newId) {
-            alert("Choose the real instructor first.");
+          const topicId = btn.dataset.topic;
+          const oldId = btn.dataset.oldId;
+          const oldName = btn.dataset.oldName;
+          const select = document.querySelector(`.topic-review-mapping[data-topic="${topicId}"][data-old-id="${oldId}"]`);
+          const chosen = Array.from(select.selectedOptions).map((o) => ({ instructorId: o.value, name: o.dataset.name }));
+
+          if (chosen.length === 0) {
+            alert("Select at least one instructor first.");
             return;
           }
+
           btn.disabled = true;
-          btn.textContent = "Merging...";
+          btn.textContent = "Saving...";
           try {
-            const result = await mergeInstructor(oldId, newId);
+            await resolveTopicSlot(topicId, oldId, oldName, chosen);
             allTopics = await getAllTopics();
             allInstructors = await getAllInstructors();
             renderStats();
             renderInstructorProgress();
-            renderFixList();
+            renderReviewTopics();
             populateFilterOptions();
             refreshPreview();
-            alert(`Merged. ${result.topicsUpdated} topic(s) updated.`);
           } catch (err) {
             alert("Error: " + err.message);
             btn.disabled = false;
-            btn.textContent = "Merge";
+            btn.textContent = "Accept";
           }
         });
       });
@@ -352,13 +289,13 @@
 
       const isAdmin = await isCurrentUserAdmin();
       $("import-section").style.display = isAdmin ? "block" : "none";
-      $("fix-section").style.display = isAdmin ? "block" : "none";
+      $("review-topics-section").style.display = isAdmin ? "block" : "none";
 
       allTopics = await getAllTopics();
       allInstructors = await getAllInstructors();
       renderStats();
       renderInstructorProgress();
-      renderFixList();
+      renderReviewTopics();
       populateFilterOptions();
       refreshPreview();
     });
