@@ -22,6 +22,8 @@ import {
   query,
   where,
   runTransaction,
+  writeBatch,
+  deleteDoc,
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -262,4 +264,68 @@ export function downloadExcelCompatible(rows, filename = "learning-outcomes.xls"
   const header = `<tr>${EXPORT_COLUMNS.map((c) => `<th>${c}</th>`).join("")}</tr>`;
   const body = rows.map((r) => `<tr>${EXPORT_COLUMNS.map((c) => `<td>${r[c] ?? ""}</td>`).join("")}</tr>`).join("");
   downloadBlob(`<table>${header}${body}</table>`, filename, "application/vnd.ms-excel");
+}
+
+// ================================================================
+// FIX UNMATCHED INSTRUCTORS (merge a placeholder into a real one)
+// ================================================================
+// Placeholder instructors are ones created during import from a raw
+// name that couldn't be matched (accessType "guest", no email). This
+// lets an admin fix them one at a time, later, without re-importing:
+// every topic that had the placeholder gets the real instructor
+// swapped in instead, and the placeholder record is deleted.
+
+export async function getPlaceholderInstructors(allInstructors) {
+  return allInstructors.filter((i) => !i.email);
+}
+
+export async function countTopicsForInstructor(instructorId) {
+  const q = query(collection(db, "topics"), where("assignedInstructorIDs", "array-contains", instructorId));
+  const snap = await getDocs(q);
+  return snap.size;
+}
+
+export async function mergeInstructor(oldInstructorId, newInstructorId) {
+  if (oldInstructorId === newInstructorId) return { topicsUpdated: 0 };
+
+  const oldSnap = await getDoc(doc(db, "instructors", oldInstructorId));
+  const newSnap = await getDoc(doc(db, "instructors", newInstructorId));
+  if (!oldSnap.exists() || !newSnap.exists()) throw new Error("Instructor not found.");
+  const oldName = oldSnap.data().name;
+  const newName = newSnap.data().name;
+
+  const q = query(collection(db, "topics"), where("assignedInstructorIDs", "array-contains", oldInstructorId));
+  const snap = await getDocs(q);
+
+  const swapName = (arr) => (arr || []).map((n) => (n === oldName ? newName : n));
+
+  const BATCH_SIZE = 400;
+  const docs = snap.docs;
+  for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+    const batch = writeBatch(db);
+    for (const d of docs.slice(i, i + BATCH_SIZE)) {
+      const data = d.data();
+      const ids = new Set(data.assignedInstructorIDs || []);
+      ids.delete(oldInstructorId);
+      ids.add(newInstructorId);
+
+      const roles = { ...(data.instructorRoles || {}) };
+      const oldRoles = roles[oldInstructorId] || [];
+      roles[newInstructorId] = Array.from(new Set([...(roles[newInstructorId] || []), ...oldRoles]));
+      delete roles[oldInstructorId];
+
+      batch.update(d.ref, {
+        assignedInstructorIDs: Array.from(ids),
+        instructorRoles: roles,
+        primaryInstructorNames: swapName(data.primaryInstructorNames),
+        secondaryInstructorNames: swapName(data.secondaryInstructorNames),
+        finalizedInstructorNames: swapName(data.finalizedInstructorNames),
+      });
+    }
+    await batch.commit();
+  }
+
+  await deleteDoc(doc(db, "instructors", oldInstructorId));
+
+  return { topicsUpdated: docs.length };
 }
