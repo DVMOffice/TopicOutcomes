@@ -5,7 +5,7 @@ account keys, no emails to configure. Just the Firebase web console.
 
 ---
 
-## Step 1 — Create the Firebase project
+ ## Step 1 — Create the Firebase project
 
 1. Go to https://console.firebase.google.com/
 2. Sign in with your Google account.
