@@ -1,4 +1,4 @@
-# Step-by-step guide: connecting this app to Firebase
+ # Step-by-step guide: connecting this app to Firebase
 
 Everything is done from the browser — no Node, no terminal, no service
 account keys, no emails to configure. Just the Firebase web console.
