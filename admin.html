@@ -110,42 +110,45 @@
         list.innerHTML = `<p class="text-muted">Every name matched automatically — nothing to review.</p>`;
         return;
       }
-      list.innerHTML = reviewItems
-        .map((item) => {
-          const options = pendingAnalysis.allInstructorNames
-            .map((name) => {
-              const selected = item.suggestions.length === 1 && item.suggestions[0] === name ? "selected" : "";
-              return `<option value="${name}" ${selected}>${name}</option>`;
-            })
-            .join("");
-          const suggestionNote = item.suggestions.length > 1
-            ? `<div class="text-muted" style="font-size:0.85rem;">Could be: ${item.suggestions.join(" / ")}</div>`
-            : "";
-          const moreCount = item.occurrenceCount - item.occurrenceSample.length;
-          const occurrenceHtml = `
-            <div class="text-muted mt-1" style="font-size:0.85rem;">
-              Appears ${item.occurrenceCount} time${item.occurrenceCount === 1 ? "" : "s"}:
-              <ul style="margin:4px 0 0 18px; padding:0;">
-                ${item.occurrenceSample.map((o) => `<li>${o}</li>`).join("")}
-                ${moreCount > 0 ? `<li>...and ${moreCount} more</li>` : ""}
-              </ul>
-            </div>
-          `;
-          return `
-            <div class="form-group" style="border-bottom:1px solid var(--color-border); padding-bottom:16px; margin-bottom:16px;">
-              <label>"${item.rawText}"</label>
-              ${suggestionNote}
-              ${occurrenceHtml}
-              <select data-raw="${item.rawText}" class="review-mapping" multiple size="4" style="height:auto;">
-                ${options}
+
+      // Group visually by raw text so identical labels are easy to scan,
+      // but each occurrence still gets its OWN selector — the same raw
+      // text can mean different people in different topics.
+      const groups = new Map();
+      for (const item of reviewItems) {
+        if (!groups.has(item.rawText)) groups.set(item.rawText, []);
+        groups.get(item.rawText).push(item);
+      }
+
+      const optionsFor = (item) =>
+        pendingAnalysis.allInstructorNames
+          .map((name) => {
+            const selected = item.suggestions.includes(name) ? "selected" : "";
+            return `<option value="${name}" ${selected}>${name}</option>`;
+          })
+          .join("");
+
+      let html = "";
+      for (const [rawText, items] of groups) {
+        html += `<div style="border-bottom:1px solid var(--color-border); padding-bottom:16px; margin-bottom:16px;">`;
+        html += `<label>"${rawText}"</label>`;
+        if (items[0].suggestions.length > 0) {
+          html += `<div class="text-muted mt-1" style="font-size:0.85rem;">Detected: ${items[0].suggestions.join(" / ")} — pre-selected below, adjust per topic if wrong.</div>`;
+        }
+        for (const item of items) {
+          html += `
+            <div class="form-group mt-2" style="margin-left:12px;">
+              <label style="font-weight:400;">${item.year} · Course ${item.course} · ${item.topic} <span class="text-muted">(${item.role})</span></label>
+              <select data-key="${item.key}" class="review-mapping" multiple size="3" style="height:auto;">
+                ${optionsFor(item)}
               </select>
-              <div class="text-muted mt-1" style="font-size:0.8rem;">
-                Ctrl/Cmd+click to select more than one instructor (e.g. a co-taught session). Leave nothing selected to keep "${item.rawText}" as its own new instructor with no email.
-              </div>
             </div>
           `;
-        })
-        .join("");
+        }
+        html += `<div class="text-muted mt-1" style="font-size:0.8rem;">Ctrl/Cmd+click to select more than one instructor. Leave nothing selected for a topic to keep "${rawText}" as its own new instructor there (no email).</div>`;
+        html += `</div>`;
+      }
+      list.innerHTML = html;
     }
 
     $("btn-analyze").addEventListener("click", async () => {
@@ -161,8 +164,8 @@
           $("analyze-status").textContent = msg;
         });
         $("analyze-status").textContent =
-          `${pendingAnalysis.autoMatchedCount} of ${pendingAnalysis.totalRawNames} names matched automatically. ` +
-          `${pendingAnalysis.reviewItems.length} need your review below.`;
+          `${pendingAnalysis.autoMatchedCount} of ${pendingAnalysis.totalRawNames} name slots matched automatically. ` +
+          `${pendingAnalysis.reviewItems.length} topic occurrences need your review below.`;
         renderReviewList(pendingAnalysis.reviewItems);
         $("review-section").style.display = "block";
       } catch (err) {
@@ -176,7 +179,7 @@
       if (!pendingAnalysis) return;
       const mappings = {};
       document.querySelectorAll(".review-mapping").forEach((select) => {
-        mappings[select.dataset.raw] = Array.from(select.selectedOptions).map((o) => o.value); // [] = keep as new instructor
+        mappings[select.dataset.key] = Array.from(select.selectedOptions).map((o) => o.value); // [] = keep as new instructor
       });
 
       $("btn-confirm-import").disabled = true;
