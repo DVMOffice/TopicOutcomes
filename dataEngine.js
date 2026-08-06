@@ -267,16 +267,86 @@ export function downloadExcelCompatible(rows, filename = "learning-outcomes.xls"
 }
 
 // ================================================================
-// FIX UNMATCHED INSTRUCTORS (merge a placeholder into a real one)
+// REVIEW TOPICS ONE AT A TIME (fix placeholder instructors)
 // ================================================================
 // Placeholder instructors are ones created during import from a raw
-// name that couldn't be matched (accessType "guest", no email). This
-// lets an admin fix them one at a time, later, without re-importing:
-// every topic that had the placeholder gets the real instructor
-// swapped in instead, and the placeholder record is deleted.
+// name/text that couldn't be confidently matched (accessType "guest",
+// no email). This section lets an admin fix them incrementally,
+// topic by topic, over as many sessions as needed — nothing is lost
+// between visits because it's read live from Firestore, not from
+// browser memory.
 
-export async function getPlaceholderInstructors(allInstructors) {
-  return allInstructors.filter((i) => !i.email);
+/** Topics that still have at least one placeholder instructor assigned. */
+export function getTopicsNeedingReview(allTopics, allInstructors) {
+  const placeholderById = new Map(allInstructors.filter((i) => !i.email).map((i) => [i.instructorId, i]));
+  return allTopics
+    .filter((t) => (t.assignedInstructorIDs || []).some((id) => placeholderById.has(id)))
+    .map((t) => ({
+      ...t,
+      placeholderSlots: (t.assignedInstructorIDs || [])
+        .filter((id) => placeholderById.has(id))
+        .map((id) => ({
+          instructorId: id,
+          rawName: placeholderById.get(id).name,
+          roles: (t.instructorRoles || {})[id] || [],
+        })),
+    }));
+}
+
+function replaceInArray(arr, oldValue, newValues) {
+  const list = [...(arr || [])];
+  const idx = list.indexOf(oldValue);
+  if (idx === -1) return list;
+  list.splice(idx, 1, ...newValues);
+  return list;
+}
+
+/**
+ * Resolves ONE placeholder slot within ONE topic — does not touch any
+ * other topic that might reference the same placeholder instructor.
+ * newInstructors: array of { instructorId, name } chosen by the admin
+ * (can be more than one, e.g. a co-taught session). An empty array
+ * leaves that topic's slot as-is (no-op — use this if they intentionally
+ * skip a topic for now).
+ */
+export async function resolveTopicSlot(topicId, oldInstructorId, oldRawName, newInstructors) {
+  if (!newInstructors || newInstructors.length === 0) return { updated: false };
+
+  const ref = doc(db, "topics", topicId);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error("Topic not found");
+    const data = snap.data();
+
+    const ids = new Set(data.assignedInstructorIDs || []);
+    ids.delete(oldInstructorId);
+    for (const ni of newInstructors) ids.add(ni.instructorId);
+
+    const roles = { ...(data.instructorRoles || {}) };
+    const oldRoles = roles[oldInstructorId] || [];
+    for (const ni of newInstructors) {
+      roles[ni.instructorId] = Array.from(new Set([...(roles[ni.instructorId] || []), ...oldRoles]));
+    }
+    delete roles[oldInstructorId];
+
+    const newNames = newInstructors.map((ni) => ni.name);
+
+    tx.update(ref, {
+      assignedInstructorIDs: Array.from(ids),
+      instructorRoles: roles,
+      primaryInstructorNames: replaceInArray(data.primaryInstructorNames, oldRawName, newNames),
+      secondaryInstructorNames: replaceInArray(data.secondaryInstructorNames, oldRawName, newNames),
+      finalizedInstructorNames: replaceInArray(data.finalizedInstructorNames, oldRawName, newNames),
+    });
+  });
+
+  // If no other topic references this placeholder anymore, clean it up.
+  const stillUsed = await countTopicsForInstructor(oldInstructorId);
+  if (stillUsed === 0) {
+    try { await deleteDoc(doc(db, "instructors", oldInstructorId)); } catch (e) { /* noop */ }
+  }
+
+  return { updated: true };
 }
 
 export async function countTopicsForInstructor(instructorId) {
@@ -285,7 +355,13 @@ export async function countTopicsForInstructor(instructorId) {
   return snap.size;
 }
 
-export async function mergeInstructor(oldInstructorId, newInstructorId) {
+/**
+ * Bulk shortcut: merges a placeholder into a real instructor across
+ * EVERY topic that references it at once (instead of one at a time).
+ * Useful when you're sure the same placeholder always means the same
+ * person everywhere it appears.
+ */
+export async function mergeInstructorEverywhere(oldInstructorId, newInstructorId) {
   if (oldInstructorId === newInstructorId) return { topicsUpdated: 0 };
 
   const oldSnap = await getDoc(doc(db, "instructors", oldInstructorId));
