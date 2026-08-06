@@ -4,16 +4,21 @@
  * Data import DIRECTLY FROM THE BROWSER, no Node, no terminal.
  *
  * This is a TWO-STEP process on purpose, because instructor names in
- * the master list don't always match the email list exactly (e.g.
- * "CK" instead of "Cameron Knight"). Nothing gets auto-matched and
- * uploaded silently:
+ * the master list are often messy — not just "CK" instead of
+ * "Cameron Knight", but compound text like:
+ *   "Sessional: Garrett Oetelaar or Megan Murphy"
+ * which actually contains TWO real instructors mixed with a label.
+ * Nothing gets auto-matched and uploaded silently:
  *
  *   1. analyzeImport(masterFile, emailsFile) reads both files and
- *      returns every raw instructor name that could NOT be matched
- *      with certainty, plus suggestions where possible (e.g. if the
- *      text looks like initials and matches exactly one instructor).
- *   2. The admin reviews that list in admin.html and picks the right
- *      instructor (or "keep as a new instructor") for each one.
+ *      returns ONE REVIEW ROW PER TOPIC OCCURRENCE for any raw text
+ *      that isn't an exact match — with suggestions pre-filled by
+ *      searching for real instructor names embedded inside the raw
+ *      text (and, for short all-caps text like "CK", by initials).
+ *   2. The admin reviews that list in admin.html, per topic, and
+ *      adjusts the selection if needed (the same raw text can mean
+ *      different people in different topics — e.g. "or" usually
+ *      means only ONE of the two taught that specific session).
  *   3. finalizeImport(..., mappings) applies those confirmed choices
  *      and uploads everything to Firestore.
  *
@@ -86,11 +91,6 @@ async function readAllSheets(file) {
   const wb = await readWorkbook(file);
   const out = {};
   for (const sheetName of wb.SheetNames) {
-    // Some spreadsheets report a huge used-range (thousands of blank
-    // formatted columns/rows) even though the real data is a small
-    // corner of the sheet. Without bounding the range, parsing that
-    // full reported range can freeze the browser tab. Our real data
-    // never goes past column P or row 3000, so we cap it there.
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: "", range: "A1:P3000" });
     out[sheetName] = rows.map((r) => ({
       Week: r["Week"], "Date Range": r["Date Range"], Course: r["Course"], Type: r["Type"], Topic: r["Topic"],
@@ -125,30 +125,42 @@ function buildInitialsIndex(accessByName) {
   return index;
 }
 
-function collectRawNames(masterRowsByYear) {
-  // Map: rawName -> array of { year, course, topic } where it appears,
-  // so the admin has context when deciding who a name refers to.
-  const occurrencesByName = new Map();
-  for (const year of Object.keys(masterRowsByYear)) {
-    for (const row of masterRowsByYear[year]) {
-      if (!isRealTopicRow(row)) continue;
-      for (const n of [...splitNames(row["Primary Instructor"]), ...splitNames(row["Secondary Instructor"]), ...splitNames(row["Finalized Instructors"])]) {
-        if (!occurrencesByName.has(n)) occurrencesByName.set(n, []);
-        occurrencesByName.get(n).push({ year, course: String(row.Course), topic: String(row.Topic).trim() });
-      }
-    }
+/**
+ * Finds real instructor names embedded inside messy raw text, e.g.
+ * "Sessional: Garrett Oetelaar or Megan Murphy" contains both
+ * "Garrett Oetelaar" and "Megan Murphy" — this just checks whether
+ * each known full name appears as a substring, which works
+ * regardless of labels, colons, "or"/"and", etc. around it.
+ */
+function findEmbeddedNames(rawText, accessByName) {
+  const haystack = normalizeNameKey(rawText);
+  const found = [];
+  for (const entry of accessByName.values()) {
+    if (haystack.includes(normalizeNameKey(entry.name))) found.push(entry.name);
   }
-  return occurrencesByName;
+  return found;
+}
+
+function suggestNames(rawText, accessByName, initialsIndex) {
+  const embedded = findEmbeddedNames(rawText, accessByName);
+  if (embedded.length > 0) return embedded;
+  if (looksLikeInitials(rawText)) {
+    const candidates = initialsIndex.get(rawText.trim().toUpperCase()) || [];
+    return candidates.map((c) => c.name);
+  }
+  return [];
 }
 
 // ================================================================
-// STEP 1 — Analyze: find every name that needs a human decision
+// STEP 1 — Analyze: one review row per TOPIC OCCURRENCE that needs
+// a human decision (not grouped globally by raw text, since the
+// same raw text can mean different people in different topics).
 // ================================================================
 
-/**
- * Reads both files and returns everything needed to review + finalize.
- * Nothing is uploaded yet.
- */
+function occurrenceKey(year, course, topic, role, rawText) {
+  return `${year}|${course}|${topic}|${role}|${rawText}`;
+}
+
 export async function analyzeImport(masterListFile, emailsListFile, onProgress = () => {}) {
   onProgress("Reading the master list...");
   const masterRowsByYear = await readAllSheets(masterListFile);
@@ -158,63 +170,72 @@ export async function analyzeImport(masterListFile, emailsListFile, onProgress =
   const initialsIndex = buildInitialsIndex(accessByName);
 
   onProgress("Comparing instructor names...");
-  const occurrencesByName = collectRawNames(masterRowsByYear);
-  const rawNames = Array.from(occurrencesByName.keys());
   const allInstructorNames = Array.from(accessByName.values()).map((a) => a.name).sort();
 
   const reviewItems = [];
-  for (const raw of rawNames) {
-    if (accessByName.has(normalizeNameKey(raw))) continue; // exact match, no review needed
+  let totalRawNameSlots = 0;
 
-    let suggestions = [];
-    if (looksLikeInitials(raw)) {
-      const candidates = initialsIndex.get(raw.trim().toUpperCase()) || [];
-      suggestions = candidates.map((c) => c.name);
+  for (const year of Object.keys(masterRowsByYear)) {
+    for (const row of masterRowsByYear[year]) {
+      if (!isRealTopicRow(row)) continue;
+      const topic = String(row.Topic).trim();
+      const course = String(row.Course);
+
+      const roleFields = [
+        ["primary", splitNames(row["Primary Instructor"])],
+        ["secondary", splitNames(row["Secondary Instructor"])],
+        ["finalized", splitNames(row["Finalized Instructors"])],
+      ];
+
+      for (const [role, names] of roleFields) {
+        for (const rawText of names) {
+          totalRawNameSlots++;
+          if (accessByName.has(normalizeNameKey(rawText))) continue; // exact match, no review needed
+
+          reviewItems.push({
+            key: occurrenceKey(year, course, topic, role, rawText),
+            rawText,
+            year, course, topic, role,
+            suggestions: suggestNames(rawText, accessByName, initialsIndex),
+          });
+        }
+      }
     }
-
-    const occ = occurrencesByName.get(raw) || [];
-    const occurrenceCount = occ.length;
-    const occurrenceSample = occ.slice(0, 5).map((o) => `${o.year} · Course ${o.course} · ${o.topic}`);
-
-    reviewItems.push({ rawText: raw, suggestions, occurrenceCount, occurrenceSample });
   }
 
   return {
     masterRowsByYear,
     accessByName,
     allInstructorNames,
-    reviewItems,           // [{ rawText: "CK", suggestions: [...], occurrenceCount, occurrenceSample }, ...]
-    autoMatchedCount: rawNames.length - reviewItems.length,
-    totalRawNames: rawNames.length,
+    reviewItems,
+    autoMatchedCount: totalRawNameSlots - reviewItems.length,
+    totalRawNames: totalRawNameSlots,
   };
 }
 
 // ================================================================
-// STEP 2 — Finalize: apply the admin's confirmed mappings and upload
+// STEP 2 — Finalize: apply the admin's confirmed per-occurrence
+// mappings and upload.
 // ================================================================
 
-function buildRoster(masterRowsByYear, accessByName, mappings) {
+function buildRosterAndTopics(masterRowsByYear, accessByName, mappings) {
   const roster = new Map();
   let counter = 1;
 
-  // Returns an ARRAY of identities — usually one, but can be more than
-  // one if the admin mapped a raw name (e.g. "Combined") to multiple
-  // real instructors.
-  function resolveMulti(rawName) {
-    const exact = accessByName.get(normalizeNameKey(rawName));
+  function resolveOccurrence(year, course, topic, role, rawText) {
+    const exact = accessByName.get(normalizeNameKey(rawText));
     if (exact) return [exact];
-    const mapped = mappings[rawName]; // array of full instructor names chosen by the admin, or [] / undefined = keep as new
+    const key = occurrenceKey(year, course, topic, role, rawText);
+    const mapped = mappings[key];
     if (Array.isArray(mapped) && mapped.length > 0) {
-      const resolved = mapped
-        .map((name) => accessByName.get(normalizeNameKey(name)))
-        .filter(Boolean);
+      const resolved = mapped.map((n) => accessByName.get(normalizeNameKey(n))).filter(Boolean);
       if (resolved.length > 0) return resolved;
     }
-    return [{ name: rawName, email: "", active: true }];
+    return [{ name: rawText, email: "", active: true }]; // keep as a new placeholder instructor
   }
 
-  function ensureAll(rawName) {
-    return resolveMulti(rawName).map((identity) => {
+  function ensureAll(identities) {
+    return identities.map((identity) => {
       const key = normalizeNameKey(identity.name);
       if (roster.has(key)) return roster.get(key);
       const id = `I${String(counter++).padStart(3, "0")}`;
@@ -230,17 +251,6 @@ function buildRoster(masterRowsByYear, accessByName, mappings) {
     });
   }
 
-  for (const year of Object.keys(masterRowsByYear)) {
-    for (const row of masterRowsByYear[year]) {
-      if (!isRealTopicRow(row)) continue;
-      const names = new Set([...splitNames(row["Primary Instructor"]), ...splitNames(row["Secondary Instructor"]), ...splitNames(row["Finalized Instructors"])]);
-      for (const n of names) ensureAll(n);
-    }
-  }
-  return { roster, resolveMulti };
-}
-
-function buildTopics(masterRowsByYear, roster, resolveMulti) {
   const topics = [];
   let excludedCount = 0;
   const counters = new Map();
@@ -249,30 +259,34 @@ function buildTopics(masterRowsByYear, roster, resolveMulti) {
     for (const row of masterRowsByYear[year]) {
       if (!isRealTopicRow(row)) { excludedCount++; continue; }
 
+      const topicName = String(row.Topic).trim();
+      const course = String(row.Course);
+
       const primary = splitNames(row["Primary Instructor"]);
       const secondary = splitNames(row["Secondary Instructor"]);
       const finalized = splitNames(row["Finalized Instructors"]);
       const roles = {};
       const assignedInstructorIDs = new Set();
 
-      // Each raw name can resolve to multiple real instructors now.
-      const primaryResolved = primary.flatMap((n) => resolveMulti(n).map((i) => i.name));
-      const secondaryResolved = secondary.flatMap((n) => resolveMulti(n).map((i) => i.name));
-      const finalizedResolved = finalized.flatMap((n) => resolveMulti(n).map((i) => i.name));
-
-      function tag(resolvedNames, role) {
-        for (const n of resolvedNames) {
-          const rec = roster.get(normalizeNameKey(n));
-          if (!rec) continue;
-          assignedInstructorIDs.add(rec.instructorId);
-          roles[rec.instructorId] = roles[rec.instructorId] || [];
-          if (!roles[rec.instructorId].includes(role)) roles[rec.instructorId].push(role);
+      function resolveField(names, role) {
+        const resolvedNames = [];
+        for (const rawText of names) {
+          const identities = resolveOccurrence(year, course, topicName, role, rawText);
+          const records = ensureAll(identities);
+          for (const rec of records) {
+            resolvedNames.push(rec.name);
+            assignedInstructorIDs.add(rec.instructorId);
+            roles[rec.instructorId] = roles[rec.instructorId] || [];
+            if (!roles[rec.instructorId].includes(role)) roles[rec.instructorId].push(role);
+          }
         }
+        return resolvedNames;
       }
-      tag(primaryResolved, "primary"); tag(secondaryResolved, "secondary"); tag(finalizedResolved, "finalized");
 
-      const course = String(row.Course);
-      const topicName = String(row.Topic).trim();
+      const primaryResolved = resolveField(primary, "primary");
+      const secondaryResolved = resolveField(secondary, "secondary");
+      const finalizedResolved = resolveField(finalized, "finalized");
+
       const dedupeKey = `${year}-${course}-${slugify(topicName)}`;
       const n = (counters.get(dedupeKey) || 0) + 1;
       counters.set(dedupeKey, n);
@@ -286,7 +300,8 @@ function buildTopics(masterRowsByYear, roster, resolveMulti) {
       });
     }
   }
-  return { topics, excludedCount };
+
+  return { roster, topics, excludedCount };
 }
 
 async function uploadInBatches(collectionName, docs, idField, onProgress) {
@@ -301,17 +316,15 @@ async function uploadInBatches(collectionName, docs, idField, onProgress) {
 }
 
 /**
- * mappings: { [rawText]: string[] } — the instructor full name(s) the
- * admin chose for that raw text. An empty array / missing entry means
- * "keep this raw name as its own new instructor" (created with no email).
+ * mappings: { [occurrenceKey]: string[] } — the instructor full
+ * name(s) the admin chose for that SPECIFIC topic occurrence. An
+ * empty array / missing entry means "keep this raw text as its own
+ * new instructor" for that occurrence.
  */
 export async function finalizeImport(masterRowsByYear, accessByName, mappings, onProgress = () => {}) {
-  onProgress("Applying your name mappings...");
-  const { roster, resolveMulti } = buildRoster(masterRowsByYear, accessByName, mappings);
+  onProgress("Applying your choices...");
+  const { roster, topics, excludedCount } = buildRosterAndTopics(masterRowsByYear, accessByName, mappings);
   const instructors = Array.from(roster.values());
-
-  onProgress("Building topics...");
-  const { topics, excludedCount } = buildTopics(masterRowsByYear, roster, resolveMulti);
 
   onProgress(`Uploading ${instructors.length} instructors...`);
   await uploadInBatches("instructors", instructors, "instructorId", (done, total) => onProgress(`Instructors: ${done}/${total}`));
