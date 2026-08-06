@@ -1,26 +1,23 @@
 /**
  * importEngine.js
  * ---------------------------------------------------------------
- * Data import DIRECTLY FROM THE BROWSER, no Node, no terminal.
+ * Data import DIRECTLY FROM THE BROWSER, no Node, no terminal, and
+ * ONE STEP — nothing blocks the upload waiting for a full manual
+ * review. Instead:
  *
- * This is a TWO-STEP process on purpose, because instructor names in
- * the master list are often messy — not just "CK" instead of
- * "Cameron Knight", but compound text like:
- *   "Sessional: Garrett Oetelaar or Megan Murphy"
- * which actually contains TWO real instructors mixed with a label.
- * Nothing gets auto-matched and uploaded silently:
+ *   - An exact name match uploads normally.
+ *   - A raw name/text that confidently resolves to exactly ONE real
+ *     instructor (either it contains that instructor's full name, or
+ *     it looks like initials that match exactly one person) gets
+ *     auto-linked.
+ *   - Anything ambiguous (0 or 2+ possible matches — e.g. "Sessional:
+ *     Garrett Oetelaar or Megan Murphy", which could be either
+ *     person) is NOT guessed. It's imported as its own placeholder
+ *     instructor (no email) so nothing blocks the rest of the data.
  *
- *   1. analyzeImport(masterFile, emailsFile) reads both files and
- *      returns ONE REVIEW ROW PER TOPIC OCCURRENCE for any raw text
- *      that isn't an exact match — with suggestions pre-filled by
- *      searching for real instructor names embedded inside the raw
- *      text (and, for short all-caps text like "CK", by initials).
- *   2. The admin reviews that list in admin.html, per topic, and
- *      adjusts the selection if needed (the same raw text can mean
- *      different people in different topics — e.g. "or" usually
- *      means only ONE of the two taught that specific session).
- *   3. finalizeImport(..., mappings) applies those confirmed choices
- *      and uploads everything to Firestore.
+ * The admin then fixes placeholders whenever they have time, one
+ * topic at a time, from the persistent "Review topics" section in
+ * admin.html (backed by dataEngine.js) — no need to redo the import.
  *
  * Requires an admin session (validated via the admin code — see
  * app.js signInAsAdmin) — enforced by firestore.rules, which only
@@ -125,130 +122,55 @@ function buildInitialsIndex(accessByName) {
   return index;
 }
 
-/**
- * Finds real instructor names embedded inside messy raw text, e.g.
- * "Sessional: Garrett Oetelaar or Megan Murphy" contains both
- * "Garrett Oetelaar" and "Megan Murphy" — this just checks whether
- * each known full name appears as a substring, which works
- * regardless of labels, colons, "or"/"and", etc. around it.
- */
 function findEmbeddedNames(rawText, accessByName) {
   const haystack = normalizeNameKey(rawText);
   const found = [];
   for (const entry of accessByName.values()) {
-    if (haystack.includes(normalizeNameKey(entry.name))) found.push(entry.name);
+    if (haystack.includes(normalizeNameKey(entry.name))) found.push(entry);
   }
   return found;
 }
 
-function suggestNames(rawText, accessByName, initialsIndex) {
+/** Returns a single confident match, or null if ambiguous/unknown. */
+function confidentMatch(rawText, accessByName, initialsIndex) {
   const embedded = findEmbeddedNames(rawText, accessByName);
-  if (embedded.length > 0) return embedded;
+  if (embedded.length === 1) return embedded[0];
+  if (embedded.length > 1) return null; // ambiguous — don't guess
+
   if (looksLikeInitials(rawText)) {
     const candidates = initialsIndex.get(rawText.trim().toUpperCase()) || [];
-    return candidates.map((c) => c.name);
+    if (candidates.length === 1) return candidates[0];
   }
-  return [];
+  return null;
 }
 
-// ================================================================
-// STEP 1 — Analyze: one review row per TOPIC OCCURRENCE that needs
-// a human decision (not grouped globally by raw text, since the
-// same raw text can mean different people in different topics).
-// ================================================================
-
-function occurrenceKey(year, course, topic, role, rawText) {
-  return `${year}|${course}|${topic}|${role}|${rawText}`;
-}
-
-export async function analyzeImport(masterListFile, emailsListFile, onProgress = () => {}) {
-  onProgress("Reading the master list...");
-  const masterRowsByYear = await readAllSheets(masterListFile);
-
-  onProgress("Reading the email list...");
-  const accessByName = await readAccessList(emailsListFile);
-  const initialsIndex = buildInitialsIndex(accessByName);
-
-  onProgress("Comparing instructor names...");
-  const allInstructorNames = Array.from(accessByName.values()).map((a) => a.name).sort();
-
-  const reviewItems = [];
-  let totalRawNameSlots = 0;
-
-  for (const year of Object.keys(masterRowsByYear)) {
-    for (const row of masterRowsByYear[year]) {
-      if (!isRealTopicRow(row)) continue;
-      const topic = String(row.Topic).trim();
-      const course = String(row.Course);
-
-      const roleFields = [
-        ["primary", splitNames(row["Primary Instructor"])],
-        ["secondary", splitNames(row["Secondary Instructor"])],
-        ["finalized", splitNames(row["Finalized Instructors"])],
-      ];
-
-      for (const [role, names] of roleFields) {
-        for (const rawText of names) {
-          totalRawNameSlots++;
-          if (accessByName.has(normalizeNameKey(rawText))) continue; // exact match, no review needed
-
-          reviewItems.push({
-            key: occurrenceKey(year, course, topic, role, rawText),
-            rawText,
-            year, course, topic, role,
-            suggestions: suggestNames(rawText, accessByName, initialsIndex),
-          });
-        }
-      }
-    }
-  }
-
-  return {
-    masterRowsByYear,
-    accessByName,
-    allInstructorNames,
-    reviewItems,
-    autoMatchedCount: totalRawNameSlots - reviewItems.length,
-    totalRawNames: totalRawNameSlots,
-  };
-}
-
-// ================================================================
-// STEP 2 — Finalize: apply the admin's confirmed per-occurrence
-// mappings and upload.
-// ================================================================
-
-function buildRosterAndTopics(masterRowsByYear, accessByName, mappings) {
+function buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex) {
   const roster = new Map();
   let counter = 1;
+  let placeholderCount = 0;
 
-  function resolveOccurrence(year, course, topic, role, rawText) {
+  function resolveOne(rawText) {
     const exact = accessByName.get(normalizeNameKey(rawText));
-    if (exact) return [exact];
-    const key = occurrenceKey(year, course, topic, role, rawText);
-    const mapped = mappings[key];
-    if (Array.isArray(mapped) && mapped.length > 0) {
-      const resolved = mapped.map((n) => accessByName.get(normalizeNameKey(n))).filter(Boolean);
-      if (resolved.length > 0) return resolved;
-    }
-    return [{ name: rawText, email: "", active: true }]; // keep as a new placeholder instructor
+    if (exact) return exact;
+    const confident = confidentMatch(rawText, accessByName, initialsIndex);
+    if (confident) return confident;
+    placeholderCount++;
+    return { name: rawText, email: "", active: true };
   }
 
-  function ensureAll(identities) {
-    return identities.map((identity) => {
-      const key = normalizeNameKey(identity.name);
-      if (roster.has(key)) return roster.get(key);
-      const id = `I${String(counter++).padStart(3, "0")}`;
-      const record = {
-        instructorId: id,
-        name: identity.name,
-        email: identity.email || "",
-        accessType: identity.email ? "email" : "guest",
-        active: identity.email ? identity.active : true,
-      };
-      roster.set(key, record);
-      return record;
-    });
+  function ensure(identity) {
+    const key = normalizeNameKey(identity.name);
+    if (roster.has(key)) return roster.get(key);
+    const id = `I${String(counter++).padStart(3, "0")}`;
+    const record = {
+      instructorId: id,
+      name: identity.name,
+      email: identity.email || "",
+      accessType: identity.email ? "email" : "guest",
+      active: identity.email ? identity.active : true,
+    };
+    roster.set(key, record);
+    return record;
   }
 
   const topics = [];
@@ -269,18 +191,14 @@ function buildRosterAndTopics(masterRowsByYear, accessByName, mappings) {
       const assignedInstructorIDs = new Set();
 
       function resolveField(names, role) {
-        const resolvedNames = [];
-        for (const rawText of names) {
-          const identities = resolveOccurrence(year, course, topicName, role, rawText);
-          const records = ensureAll(identities);
-          for (const rec of records) {
-            resolvedNames.push(rec.name);
-            assignedInstructorIDs.add(rec.instructorId);
-            roles[rec.instructorId] = roles[rec.instructorId] || [];
-            if (!roles[rec.instructorId].includes(role)) roles[rec.instructorId].push(role);
-          }
-        }
-        return resolvedNames;
+        return names.map((rawText) => {
+          const identity = resolveOne(rawText);
+          const rec = ensure(identity);
+          assignedInstructorIDs.add(rec.instructorId);
+          roles[rec.instructorId] = roles[rec.instructorId] || [];
+          if (!roles[rec.instructorId].includes(role)) roles[rec.instructorId].push(role);
+          return rec.name;
+        });
       }
 
       const primaryResolved = resolveField(primary, "primary");
@@ -301,7 +219,7 @@ function buildRosterAndTopics(masterRowsByYear, accessByName, mappings) {
     }
   }
 
-  return { roster, topics, excludedCount };
+  return { roster, topics, excludedCount, placeholderCount };
 }
 
 async function uploadInBatches(collectionName, docs, idField, onProgress) {
@@ -316,14 +234,21 @@ async function uploadInBatches(collectionName, docs, idField, onProgress) {
 }
 
 /**
- * mappings: { [occurrenceKey]: string[] } — the instructor full
- * name(s) the admin chose for that SPECIFIC topic occurrence. An
- * empty array / missing entry means "keep this raw text as its own
- * new instructor" for that occurrence.
+ * Single entry point: reads both files, resolves what it confidently
+ * can, uploads everything (confident matches + placeholders for the
+ * rest) in one go. Nothing blocks on manual review — fix placeholders
+ * later, incrementally, from the "Review topics" section in admin.html.
  */
-export async function finalizeImport(masterRowsByYear, accessByName, mappings, onProgress = () => {}) {
-  onProgress("Applying your choices...");
-  const { roster, topics, excludedCount } = buildRosterAndTopics(masterRowsByYear, accessByName, mappings);
+export async function importNow(masterListFile, emailsListFile, onProgress = () => {}) {
+  onProgress("Reading the master list...");
+  const masterRowsByYear = await readAllSheets(masterListFile);
+
+  onProgress("Reading the email list...");
+  const accessByName = await readAccessList(emailsListFile);
+  const initialsIndex = buildInitialsIndex(accessByName);
+
+  onProgress("Matching instructor names...");
+  const { roster, topics, excludedCount, placeholderCount } = buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex);
   const instructors = Array.from(roster.values());
 
   onProgress(`Uploading ${instructors.length} instructors...`);
@@ -337,5 +262,6 @@ export async function finalizeImport(masterRowsByYear, accessByName, mappings, o
     instructorsWithoutEmail: instructors.filter((i) => !i.email).length,
     totalTopics: topics.length,
     excludedRows: excludedCount,
+    placeholderSlots: placeholderCount,
   };
 }
