@@ -2,13 +2,11 @@
  * app.js
  * ---------------------------------------------------------------
  * Everything related to "who am I" lives here:
- *   - Instructor access by email (no password, instant — only works
- *     if that email already exists in the "instructors" list)
- *   - Instructor access by academic-year code + name search (for
- *     instructors who don't have an email on file)
- *   - Administrator access by a separate admin code
- *   - Current session / sign out
- *   - Instructor searches and lookups
+ *   - Instructor access: search their name, click it, done. No
+ *     email, no password, no code — as simple as a Google search.
+ *   - Administrator access by a separate admin code.
+ *   - Current session / sign out.
+ *   - Instructor searches and lookups.
  *
  * If you need to fix anything about login or how an
  * instructor is identified, do it HERE, in this single file.
@@ -33,7 +31,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // Makes sure there is an active (anonymous) Firebase Auth session.
-// Every access path — email, year code, or admin code — relies on
+// Every access path — instructor search or admin code — relies on
 // this same underlying session; what differs is which identity gets
 // attached to it afterwards (an instructor ID, or an admin flag).
 async function ensureSignedIn() {
@@ -44,43 +42,16 @@ async function ensureSignedIn() {
 }
 
 // ================================================================
-// INSTRUCTOR ACCESS BY EMAIL (no password, instant)
+// INSTRUCTOR ACCESS: search name -> pick it -> done
 // ================================================================
 
-/** Only works if this exact email already exists in "instructors". */
-export async function signInWithInstructorEmail(email) {
-  const normalized = email.trim().toLowerCase();
+export async function searchInstructorsByName(nameFragment) {
   await ensureSignedIn(); // must be signed in before reading "instructors" (see firestore.rules)
-  const instructor = await getInstructorByEmail(normalized);
-  if (!instructor) {
-    throw new Error("We could not find that email in the instructor list. Contact your administrator.");
-  }
-  setGuestInstructorId(instructor.instructorId);
-  return instructor;
-}
-
-// ================================================================
-// INSTRUCTOR ACCESS BY YEAR CODE (for instructors with no email)
-// ================================================================
-
-export async function validateGuestCode(academicYear, code) {
-  await ensureSignedIn(); // must be signed in before reading "accessCodes" (see firestore.rules)
-  const snap = await getDocs(collection(db, "accessCodes"));
-  const match = snap.docs.find((d) => d.id === academicYear);
-  if (!match) throw new Error("Invalid academic year.");
-  if (String(match.data().code).trim() !== String(code).trim()) {
-    throw new Error("Incorrect access code.");
-  }
-  return true;
-}
-
-export async function startGuestSession(academicYear) {
-  const user = await ensureSignedIn();
-  await setDoc(doc(db, "guestSessions", user.uid), {
-    academicYear,
-    startedAt: serverTimestamp(),
-  });
-  return user;
+  const snap = await getDocs(collection(db, "instructors"));
+  const frag = nameFragment.toLowerCase();
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((i) => i.name.toLowerCase().includes(frag) && i.active !== false);
 }
 
 export function setGuestInstructorId(instructorId) {
@@ -88,6 +59,12 @@ export function setGuestInstructorId(instructorId) {
 }
 export function getGuestInstructorId() {
   return window.sessionStorage.getItem("guestInstructorId");
+}
+
+/** Picks an instructor identity for this browser session. */
+export async function signInAsInstructor(instructorId) {
+  await ensureSignedIn();
+  setGuestInstructorId(instructorId);
 }
 
 // ================================================================
@@ -134,13 +111,12 @@ export async function logOut() {
   window.sessionStorage.removeItem("guestInstructorId");
   window.sessionStorage.removeItem("isAdmin");
   if (uid) {
-    // Best-effort cleanup; ignore failures (e.g. doc never existed).
     try { await deleteDoc(doc(db, "adminSessions", uid)); } catch (e) { /* noop */ }
   }
   await signOut(auth);
 }
 
-/** Resolves the full record of the current instructor (email or year-code access). */
+/** Resolves the full record of the current instructor. */
 export async function getCurrentInstructor(user) {
   if (!user) return null;
   const guestId = getGuestInstructorId();
@@ -151,23 +127,9 @@ export async function getCurrentInstructor(user) {
 // INSTRUCTOR LOOKUPS
 // ================================================================
 
-export async function getInstructorByEmail(email) {
-  const q = query(collection(db, "instructors"), where("email", "==", email.toLowerCase().trim()));
-  const snap = await getDocs(q);
-  return snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() };
-}
-
 export async function getInstructorById(instructorId) {
   const snap = await getDoc(doc(db, "instructors", instructorId));
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
-}
-
-export async function searchInstructorsByName(nameFragment) {
-  const snap = await getDocs(collection(db, "instructors"));
-  const frag = nameFragment.toLowerCase();
-  return snap.docs
-    .map((d) => ({ id: d.id, ...d.data() }))
-    .filter((i) => i.name.toLowerCase().includes(frag) && i.active !== false);
 }
 
 export async function getAllInstructors() {
