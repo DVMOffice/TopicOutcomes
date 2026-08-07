@@ -1,15 +1,15 @@
-<!DOCTYPE h agotml>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>UCVM Learning Outcomes — Topic</title>
-<link rel="stylesheet" h agoref="style.css" />
+<link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="topbar">
     <h1>UCVM Learning Outcomes</h1>
-    <a h agoref="dashboard.html" style="color:#fff;">← Back to my dashboard</a>
+    <a href="dashboard.html" style="color:#fff;">← Back to my dashboard</a>
   </div>
 
   <div class="main-content">
@@ -21,7 +21,8 @@
 
     <div style="display:grid; grid-template-columns: 2fr 1fr; gap: 24px;">
       <div class="card">
-        <h3>Learning outcomes (minimum 6, maximum 8)</h3>
+        <h3 id="outcomes-heading">Please fill in the learning outcomes</h3>
+        <p class="text-muted mt-1" id="outcomes-subheading">There is no minimum or maximum — click "Add outcome" to add as many as you need.</p>
         <div id="outcomes-list"></div>
 
         <div class="form-group mt-4" id="new-outcome-form">
@@ -75,12 +76,16 @@
         .map(
           (o) => `
         <div class="outcome-item">
-          <strong>Outcome ${o.outcomeNumber}</strong>
-          <p class="mt-1">${o.text}</p>
-          <div class="outcome-meta">Added by ${o.createdByName} · Updated by ${o.updatedByName} (${timeAgo(o.updatedAt)})</div>
-          <div class="flex gap-2 mt-2">
-            <button class="btn btn-secondary edit-outcome" data-num="${o.outcomeNumber}">Edit</button>
-            <button class="btn btn-danger delete-outcome" data-num="${o.outcomeNumber}">Delete</button>
+          <div class="flex gap-2" style="align-items:flex-start;">
+            <strong style="min-width:22px;">${o.outcomeNumber}.</strong>
+            <div style="flex:1;">
+              <p style="margin:0;">${o.text}</p>
+              <div class="outcome-meta">Added by ${o.createdByName} · Updated by ${o.updatedByName} (${timeAgo(o.updatedAt)})</div>
+              <div class="flex gap-2 mt-2">
+                <button class="btn btn-secondary edit-outcome" data-num="${o.outcomeNumber}">Edit</button>
+                <button class="btn btn-danger delete-outcome" data-num="${o.outcomeNumber}">Delete</button>
+              </div>
+            </div>
           </div>
         </div>
       `
@@ -103,14 +108,12 @@
           await deleteOutcome(topicId, Number(btn.dataset.num), { instructorId: currentInstructor.instructorId, instructorName: currentInstructor.name });
         });
       });
-
-      $("new-outcome-form").style.display = outcomes.length >= 8 ? "none" : "block";
     }
 
     function renderActivity(topic) {
-      const h agoistory = topic.activityHistory || [];
+      const history = topic.activityHistory || [];
       $("activity-feed").innerHTML =
-        h agoistory.map((a) => `<div class="activity-item"><strong>${a.instructorName}</strong>&nbsp;${a.action} · <span class="text-muted">${timeAgo(a.timestamp)}</span></div>`).join("") ||
+        history.map((a) => `<div class="activity-item"><strong>${a.instructorName}</strong>&nbsp;${a.action} · <span class="text-muted">${timeAgo(a.timestamp)}</span></div>`).join("") ||
         `<p class="text-muted">No activity yet.</p>`;
     }
 
@@ -122,8 +125,9 @@
     }
 
     function renderHeader(topic) {
-      $("topic-breadcrumb").textContent = `${topic.academicYear} · Curso ${topic.course}`;
+      $("topic-breadcrumb").textContent = `${topic.academicYear} · Course ${topic.course}`;
       $("topic-title").textContent = topic.topicName;
+      $("outcomes-heading").textContent = `Please fill in the "${topic.topicName}" learning outcomes`;
       const badge = $("topic-status-badge");
       badge.textContent = topic.completionStatus.replace("_", " ");
       badge.className = `badge badge-${topic.completionStatus.replace("_", "-")}`;
