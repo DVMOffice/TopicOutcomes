@@ -252,9 +252,8 @@ function buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex) {
     return record;
   }
 
-  const topics = [];
+  const topicsByKey = new Map(); // dedupeKey -> topic object (merged across repeated rows)
   let excludedCount = 0;
-  const counters = new Map();
 
   for (const year of Object.keys(masterRowsByYear)) {
     for (const row of masterRowsByYear[year]) {
@@ -262,15 +261,23 @@ function buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex) {
 
       const topicName = String(row.Topic).trim();
       const course = String(row.Course);
+      const dedupeKey = `${year}-${course}-${slugify(topicName)}`;
 
-      const primary = splitNames(row["Primary Instructor"]);
-      const secondary = splitNames(row["Secondary Instructor"]);
-      const finalized = splitNames(row["Finalized Instructors"]);
-      const roles = {};
-      const assignedInstructorIDs = new Set();
+      let topic = topicsByKey.get(dedupeKey);
+      if (!topic) {
+        topic = {
+          topicId: dedupeKey, academicYear: year, course, topicName,
+          primaryInstructorNames: [], secondaryInstructorNames: [], finalizedInstructorNames: [],
+          assignedInstructorIDs: [], instructorRoles: {},
+          outcomes: [], completionStatus: "not_started", activityHistory: [],
+        };
+        topicsByKey.set(dedupeKey, topic);
+      }
 
-      function resolveField(names, role) {
-        const resolvedNames = [];
+      const assignedInstructorIDs = new Set(topic.assignedInstructorIDs);
+      const roles = topic.instructorRoles;
+
+      function resolveField(names, role, targetNameArray) {
         for (const rawText of names) {
           const identities = resolveMulti(rawText, accessByName, initialsIndex);
           if (identities.length === 0) {
@@ -282,29 +289,20 @@ function buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex) {
             assignedInstructorIDs.add(rec.instructorId);
             roles[rec.instructorId] = roles[rec.instructorId] || [];
             if (!roles[rec.instructorId].includes(role)) roles[rec.instructorId].push(role);
-            resolvedNames.push(rec.name);
+            if (!targetNameArray.includes(rec.name)) targetNameArray.push(rec.name);
           }
         }
-        return resolvedNames;
       }
 
-      const primaryResolved = resolveField(primary, "primary");
-      const secondaryResolved = resolveField(secondary, "secondary");
-      const finalizedResolved = resolveField(finalized, "finalized");
+      resolveField(splitNames(row["Primary Instructor"]), "primary", topic.primaryInstructorNames);
+      resolveField(splitNames(row["Secondary Instructor"]), "secondary", topic.secondaryInstructorNames);
+      resolveField(splitNames(row["Finalized Instructors"]), "finalized", topic.finalizedInstructorNames);
 
-      const dedupeKey = `${year}-${course}-${slugify(topicName)}`;
-      const n = (counters.get(dedupeKey) || 0) + 1;
-      counters.set(dedupeKey, n);
-      const topicId = n === 1 ? dedupeKey : `${dedupeKey}-${n}`;
-
-      topics.push({
-        topicId, academicYear: year, course, topicName,
-        primaryInstructorNames: primaryResolved, secondaryInstructorNames: secondaryResolved, finalizedInstructorNames: finalizedResolved,
-        assignedInstructorIDs: Array.from(assignedInstructorIDs), instructorRoles: roles,
-        outcomes: [], completionStatus: "not_started", activityHistory: [],
-      });
+      topic.assignedInstructorIDs = Array.from(assignedInstructorIDs);
     }
   }
+
+  const topics = Array.from(topicsByKey.values());
 
   return { roster, topics, excludedCount, newInstructorsWithoutEmail, droppedRawTexts: Array.from(droppedRawTexts) };
 }
