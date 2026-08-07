@@ -1,25 +1,26 @@
 rules_version = '2';
 
 // ---------------------------------------------------------------
-// Access model (no email, no passwords, no PINs):
+// Access model:
 //
-// - Everyone signs in anonymously (instructors AND admins) after
-//   typing a code: instructors use their academic-year code,
-//   admins use a separate admin code. Neither code is ever
-//   readable by the client directly — Firestore rules compare the
-//   code the client submits against the real one internally.
+// - Instructors: search their name and pick it — no email, no
+//   password, no code. Everyone who does this signs in anonymously
+//   in Firebase Auth first (that's what makes them "signed in" for
+//   the rules below), then their chosen instructorId is remembered
+//   client-side for that browser session.
+// - Administrators: need a separate admin code. Firestore compares
+//   the code submitted against the real one internally
+//   (isAdmin() below) — the real code is never readable by any
+//   client, even a signed-in one.
 //
-// - Anyone signed in can READ instructors / topics / accessCodes.
+// - Anyone signed in can READ instructors / topics.
 // - Anyone signed in can UPDATE a topic (add/edit/delete outcomes) —
 //   that's normal instructor collaboration.
-// - Only someone who successfully validated the admin code (which
-//   creates an adminSessions/{uid} document) can WRITE to
-//   instructors, or CREATE/DELETE topics — this protects bulk
-//   import/management in admin.html.
+// - Only an admin session can WRITE to instructors, or CREATE/DELETE
+//   topics — this protects bulk import/management in admin.html.
 //
-// To change the admin code or the per-year codes, edit them
-// directly in Firestore Database > Data (adminAccess/main and
-// accessCodes/{year}) — no redeploy needed.
+// To change the admin code, edit adminAccess/main directly in the
+// Firestore Data tab — no redeploy needed.
 // ---------------------------------------------------------------
 function isSignedIn() {
   return request.auth != null;
@@ -37,36 +38,22 @@ match /databases/{database}/documents {
     allow write: if isAdmin();
   }
 
-  match /accessCodes/{year} {
-    allow read: if isSignedIn();
-    allow write: if false; // edited only from the Firebase console
-  }
-
   match /adminAccess/{docId} {
-    allow read: if false;  // never readable by clients directly
-    allow write: if false; // edited only from the Firebase console
+    allow read: if false;
+    allow write: if false;
   }
 
   match /adminSessions/{uid} {
     allow read: if isSignedIn() && request.auth.uid == uid;
-    // Both the first time (create) AND re-entering the code later on
-    // the same device (update, since the doc already exists) require
-    // the code to match. Without covering update too, a second correct
-    // attempt on a device that already has a session would be wrongly
-    // rejected.
     allow create, update: if isSignedIn() && request.auth.uid == uid
       && request.resource.data.codeProvided ==
          get(/databases/$(database)/documents/adminAccess/main).data.code;
-    allow delete: if isSignedIn() && request.auth.uid == uid; // allows "log out of admin"
-  }
-
-  match /guestSessions/{uid} {
-    allow read, write: if isSignedIn() && request.auth.uid == uid;
+    allow delete: if isSignedIn() && request.auth.uid == uid;
   }
 
   match /topics/{topicId} {
     allow read: if isSignedIn();
-    allow create, delete: if isAdmin(); // bulk import / admin only
-    allow update: if isSignedIn();      // add/edit/delete outcomes
+    allow create, delete: if isAdmin();
+    allow update: if isSignedIn();
   }
 }
