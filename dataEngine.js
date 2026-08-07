@@ -27,8 +27,7 @@ import {
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-const MIN_OUTCOMES = 6;
-const MAX_OUTCOMES = 8;
+const MIN_OUTCOMES = 6; // used only to gauge progress %, not enforced as a hard limit
 
 function computeStatus(outcomes) {
   if (!outcomes || outcomes.length === 0) return "not_started";
@@ -77,9 +76,6 @@ export async function addOutcome(topicId, { text, instructorId, instructorName }
     if (!snap.exists()) throw new Error("Topic not found");
     const data = snap.data();
     const outcomes = data.outcomes || [];
-    if (outcomes.length >= MAX_OUTCOMES) {
-      throw new Error(`This topic already has the recommended maximum of ${MAX_OUTCOMES} outcomes.`);
-    }
     const now = Timestamp.now();
     const newOutcome = {
       outcomeNumber: outcomes.length + 1,
