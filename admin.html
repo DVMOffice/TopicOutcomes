@@ -112,7 +112,7 @@
         $("import-status").textContent =
           `Done: ${result.totalInstructors} instructors (${result.instructorsWithoutEmail} without email), ` +
           `${result.totalTopics} topics imported, ${result.excludedRows} rows excluded (labs/exams/etc.), ` +
-          `${result.placeholderSlots} instructor slot(s) need review below.`;
+          `${result.newInstructorsWithoutEmail} new instructor(s) added without an email on file (searchable by name; add their email to the spreadsheet and re-import to link it).`;
 
         // Refresh the dashboard with the newly uploaded data
         allTopics = await getAllTopics();
