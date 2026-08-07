@@ -260,7 +260,7 @@ function buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex) {
       if (!isRealTopicRow(row)) { excludedCount++; continue; }
 
       const topicName = String(row.Topic).trim();
-      const course = String(row.Course);
+      const course = String(row.Course).trim();
       const dedupeKey = `${year}-${course}-${slugify(topicName)}`;
 
       let topic = topicsByKey.get(dedupeKey);
