@@ -131,28 +131,65 @@ function findEmbeddedNames(rawText, accessByName) {
   return found;
 }
 
+// Words that are never a person's name — course/program jargon,
+// department abbreviations, and generic placeholders that happen to
+// be capitalized. Extend this list as you spot more in your data.
+const NON_NAME_WORDS = new Set([
+  "sessional", "guest", "guests", "tbd", "tba", "n/a", "na", "none",
+  "cfia", "sa", "la", "staff", "business", "surgeon", "vet", "university",
+  "meds", "injections", "surgical", "skills", "review", "diagnostic",
+  "imaging", "radiology", "exercise", "exercice", "medical", "terminology",
+  "handling", "equine", "bovine", "avian", "small", "large", "animal",
+  "clinic", "clinical", "lab", "practical", "session", "group", "team",
+  "combined", "instructor", "instructors", "coordinator", "faculty",
+]);
+
 /**
- * Pulls plausible person-name candidates out of messy text as a last
- * resort, e.g. "Sessional: Adriana Pastor" -> ["Adriana Pastor"].
- * Looks for runs of 2+ consecutive capitalized words — label text
- * like "Sessional:" naturally breaks the run at the colon, so it
- * doesn't get swept in with the real name.
+ * Pulls plausible person-name candidates out of messy text, e.g.
+ * "Sessional: Adriana Pastor" -> ["Adriana Pastor"], while filtering
+ * out course/program jargon like "University Vet" or "SA Surgeon" so
+ * it never invents an instructor out of a label.
  */
 function extractNameCandidates(text) {
-  return text.match(/[A-Z][a-zA-Z''-]+(?:\s+[A-Z][a-zA-Z''-]+)+/g) || [];
+  const tokens = text.split(/\s+/);
+  const candidates = [];
+  let current = [];
+
+  function flush() {
+    if (current.length >= 2) candidates.push(current.join(" "));
+    current = [];
+  }
+
+  for (const tok of tokens) {
+    const hadColon = tok.includes(":");
+    const clean = tok.replace(/[:,;()"']/g, "");
+    const isCapWord = /^[A-Z][a-zA-Z'-]*$/.test(clean) && clean.length > 1;
+    const isBlocked = NON_NAME_WORDS.has(clean.toLowerCase());
+
+    if (isCapWord && !isBlocked) {
+      current.push(clean);
+    } else if (isBlocked) {
+      if (hadColon) flush(); // a label like "Sessional:" is a hard boundary
+      // otherwise just drop the blocked word (e.g. "University Vet Jane Doe" -> "Jane Doe")
+    } else {
+      flush(); // lowercase word, punctuation-only token, etc. — hard boundary
+    }
+  }
+  flush();
+  return candidates;
 }
 
 /**
- * Resolves a chunk of text (no "or" in it) to one or more identities.
- * Always returns at least one — nothing is left as raw, unparsed
- * compound text:
+ * Resolves a chunk of text (no "or" in it) to zero or more identities:
  *   1. Exact match against the email list.
  *   2. Any real instructor names found embedded inside it (handles
  *      chains like "Bovine: Timothy Olchowy Avian: Douglas Whiteside").
  *   3. Initials matching exactly one person.
  *   4. A clean name pulled out via extractNameCandidates(), added as
  *      a brand-new instructor even though they have no email on file.
- *   5. Absolute last resort: the raw text itself.
+ * If NONE of these find a real name, this returns an empty array —
+ * it never invents an instructor out of pure label/jargon text like
+ * "SA Surgeon" or "CFIA Staff".
  */
 function resolveChunk(text, accessByName, initialsIndex) {
   const exact = accessByName.get(normalizeNameKey(text));
@@ -171,7 +208,7 @@ function resolveChunk(text, accessByName, initialsIndex) {
     return extracted.map((name) => accessByName.get(normalizeNameKey(name)) || { name: name.trim(), email: "", active: true });
   }
 
-  return [{ name: text.trim(), email: "", active: true }];
+  return [];
 }
 
 /**
@@ -192,6 +229,7 @@ function resolveMulti(rawText, accessByName, initialsIndex) {
 function buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex) {
   const roster = new Map();
   let newInstructorsWithoutEmail = 0;
+  const droppedRawTexts = new Set(); // raw text with no extractable real name — nobody gets assigned
 
   // Stable, deterministic IDs (not a sequential counter): re-importing
   // the same person or the same unmatched raw text always produces the
@@ -234,7 +272,12 @@ function buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex) {
       function resolveField(names, role) {
         const resolvedNames = [];
         for (const rawText of names) {
-          for (const identity of resolveMulti(rawText, accessByName, initialsIndex)) {
+          const identities = resolveMulti(rawText, accessByName, initialsIndex);
+          if (identities.length === 0) {
+            droppedRawTexts.add(rawText);
+            continue;
+          }
+          for (const identity of identities) {
             const rec = ensure(identity);
             assignedInstructorIDs.add(rec.instructorId);
             roles[rec.instructorId] = roles[rec.instructorId] || [];
@@ -263,7 +306,7 @@ function buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex) {
     }
   }
 
-  return { roster, topics, excludedCount, newInstructorsWithoutEmail };
+  return { roster, topics, excludedCount, newInstructorsWithoutEmail, droppedRawTexts: Array.from(droppedRawTexts) };
 }
 
 async function uploadInBatches(collectionName, docs, idField, onProgress) {
@@ -278,10 +321,11 @@ async function uploadInBatches(collectionName, docs, idField, onProgress) {
 }
 
 /**
- * Single entry point: reads both files, resolves what it confidently
- * can, uploads everything (confident matches + placeholders for the
- * rest) in one go. Nothing blocks on manual review — fix placeholders
- * later, incrementally, from the "Review topics" section in admin.html.
+ * Single entry point: reads both files, resolves as many real
+ * instructor names as it can (matched or newly extracted), and
+ * uploads everything in one go. Text with no extractable real name
+ * (e.g. "SA Surgeon", "CFIA Staff") is skipped rather than turned
+ * into a fake instructor — see the returned droppedRawTexts.
  */
 export async function importNow(masterListFile, emailsListFile, onProgress = () => {}) {
   onProgress("Reading the master list...");
@@ -292,7 +336,7 @@ export async function importNow(masterListFile, emailsListFile, onProgress = () 
   const initialsIndex = buildInitialsIndex(accessByName);
 
   onProgress("Matching instructor names...");
-  const { roster, topics, excludedCount, newInstructorsWithoutEmail } = buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex);
+  const { roster, topics, excludedCount, newInstructorsWithoutEmail, droppedRawTexts } = buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex);
   const instructors = Array.from(roster.values());
 
   onProgress(`Uploading ${instructors.length} instructors...`);
@@ -307,5 +351,6 @@ export async function importNow(masterListFile, emailsListFile, onProgress = () 
     totalTopics: topics.length,
     excludedRows: excludedCount,
     newInstructorsWithoutEmail,
+    droppedRawTexts,
   };
 }
