@@ -12,48 +12,15 @@
       <h1 style="text-align:center;">UCVM Learning Outcomes</h1>
       <p class="text-muted" style="text-align:center;">Instructor Topic Outcomes Collection</p>
 
-      <div id="step-choice">
-        <button class="btn btn-primary btn-block mt-4" id="btn-show-email">Sign in with my email</button>
-        <button class="btn btn-secondary btn-block mt-2" id="btn-show-guest">I don't have an email on file</button>
+      <div id="step-search">
+        <div class="form-group mt-4">
+          <label for="name-search">Search your name</label>
+          <input type="search" id="name-search" placeholder="Start typing your name..." autofocus />
+        </div>
+        <div id="search-results"></div>
         <p class="text-muted mt-4" style="text-align:center; font-size: 0.8rem;">
           <a href="#" id="link-show-admin">Administrator access</a>
         </p>
-      </div>
-
-      <div id="step-email" style="display:none;">
-        <div class="form-group mt-4">
-          <label for="email-input">Your email</label>
-          <input type="email" id="email-input" placeholder="name@ucalgary.ca" />
-        </div>
-        <button class="btn btn-primary btn-block" id="btn-email-continue">Continue</button>
-        <p id="email-msg" class="text-muted mt-2"></p>
-        <button class="btn btn-secondary btn-block mt-2" id="btn-back-1">Back</button>
-      </div>
-
-      <div id="step-guest-code" style="display:none;">
-        <div class="form-group mt-4">
-          <label for="guest-year">Academic year</label>
-          <select id="guest-year">
-            <option value="Year 1">Year 1</option>
-            <option value="Year 2">Year 2</option>
-            <option value="Year 3">Year 3</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="guest-code">Access code</label>
-          <input type="text" id="guest-code" placeholder="Academic year code" />
-        </div>
-        <button class="btn btn-primary btn-block" id="btn-validate-code">Continue</button>
-        <p id="guest-msg" class="text-muted mt-2"></p>
-        <button class="btn btn-secondary btn-block mt-2" id="btn-back-2">Back</button>
-      </div>
-
-      <div id="step-guest-search" style="display:none;">
-        <div class="form-group mt-4">
-          <label for="guest-name-search">Search your name</label>
-          <input type="search" id="guest-name-search" placeholder="Type your name..." />
-        </div>
-        <div id="guest-results"></div>
       </div>
 
       <div id="step-admin" style="display:none;">
@@ -63,20 +30,17 @@
         </div>
         <button class="btn btn-primary btn-block" id="btn-admin-continue">Continue</button>
         <p id="admin-msg" class="text-muted mt-2"></p>
-        <button class="btn btn-secondary btn-block mt-2" id="btn-back-3">Back</button>
+        <button class="btn btn-secondary btn-block mt-2" id="btn-back-admin">Back</button>
       </div>
     </div>
   </div>
 
-  <!-- Logic for this page: 3 access paths (email / year code / admin code).
+  <!-- Logic for this page: instructor name search + admin code.
        Everything shared lives in app.js -->
   <script type="module">
     import {
-      signInWithInstructorEmail,
-      validateGuestCode,
-      startGuestSession,
-      setGuestInstructorId,
       searchInstructorsByName,
+      signInAsInstructor,
       signInAsAdmin,
       onAuthChange,
     } from "./app.js";
@@ -84,60 +48,29 @@
     const $ = (id) => document.getElementById(id);
 
     function showStep(id) {
-      ["step-choice", "step-email", "step-guest-code", "step-guest-search", "step-admin"].forEach((s) => {
+      ["step-search", "step-admin"].forEach((s) => {
         $(s).style.display = s === id ? "block" : "none";
       });
     }
 
-    $("btn-show-email").addEventListener("click", () => showStep("step-email"));
-    $("btn-show-guest").addEventListener("click", () => showStep("step-guest-code"));
     $("link-show-admin").addEventListener("click", (e) => { e.preventDefault(); showStep("step-admin"); });
-    $("btn-back-1").addEventListener("click", () => showStep("step-choice"));
-    $("btn-back-2").addEventListener("click", () => showStep("step-choice"));
-    $("btn-back-3").addEventListener("click", () => showStep("step-choice"));
+    $("btn-back-admin").addEventListener("click", () => showStep("step-search"));
 
-    // --- Email access (no password) ---
-    $("btn-email-continue").addEventListener("click", async () => {
-      $("email-msg").textContent = "Checking...";
-      try {
-        await signInWithInstructorEmail($("email-input").value);
-        window.location.href = "dashboard.html";
-      } catch (err) {
-        $("email-msg").textContent = err.message;
-      }
-    });
-
-    // --- Year code + name search ---
-    let selectedYear = null;
-
-    $("btn-validate-code").addEventListener("click", async () => {
-      $("guest-msg").textContent = "Validating...";
-      try {
-        const year = $("guest-year").value;
-        await validateGuestCode(year, $("guest-code").value);
-        await startGuestSession(year);
-        selectedYear = year;
-        $("guest-msg").textContent = "";
-        showStep("step-guest-search");
-      } catch (err) {
-        $("guest-msg").textContent = err.message;
-      }
-    });
-
+    // --- Instructor: search name, click it, done ---
     let searchTimeout;
-    $("guest-name-search").addEventListener("input", (e) => {
+    $("name-search").addEventListener("input", (e) => {
       clearTimeout(searchTimeout);
       const term = e.target.value.trim();
-      if (term.length < 2) { $("guest-results").innerHTML = ""; return; }
+      if (term.length < 2) { $("search-results").innerHTML = ""; return; }
       searchTimeout = setTimeout(async () => {
         const matches = await searchInstructorsByName(term);
-        $("guest-results").innerHTML = matches
-          .map((m) => `<button class="btn btn-secondary btn-block mt-2 guest-pick" data-id="${m.instructorId}">${m.name}</button>`)
+        $("search-results").innerHTML = matches
+          .map((m) => `<button class="btn btn-secondary btn-block mt-2 name-pick" data-id="${m.instructorId}">${m.name}</button>`)
           .join("") || `<p class="text-muted mt-2">No results.</p>`;
 
-        document.querySelectorAll(".guest-pick").forEach((btn) => {
-          btn.addEventListener("click", () => {
-            setGuestInstructorId(btn.dataset.id);
+        document.querySelectorAll(".name-pick").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            await signInAsInstructor(btn.dataset.id);
             window.location.href = "dashboard.html";
           });
         });
