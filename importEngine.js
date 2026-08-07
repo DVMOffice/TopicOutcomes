@@ -131,37 +131,78 @@ function findEmbeddedNames(rawText, accessByName) {
   return found;
 }
 
-/** Returns a single confident match, or null if ambiguous/unknown. */
-function confidentMatch(rawText, accessByName, initialsIndex) {
-  const embedded = findEmbeddedNames(rawText, accessByName);
-  if (embedded.length === 1) return embedded[0];
-  if (embedded.length > 1) return null; // ambiguous — don't guess
+/**
+ * Pulls plausible person-name candidates out of messy text as a last
+ * resort, e.g. "Sessional: Adriana Pastor" -> ["Adriana Pastor"].
+ * Looks for runs of 2+ consecutive capitalized words — label text
+ * like "Sessional:" naturally breaks the run at the colon, so it
+ * doesn't get swept in with the real name.
+ */
+function extractNameCandidates(text) {
+  return text.match(/[A-Z][a-zA-Z''-]+(?:\s+[A-Z][a-zA-Z''-]+)+/g) || [];
+}
 
-  if (looksLikeInitials(rawText)) {
-    const candidates = initialsIndex.get(rawText.trim().toUpperCase()) || [];
-    if (candidates.length === 1) return candidates[0];
+/**
+ * Resolves a chunk of text (no "or" in it) to one or more identities.
+ * Always returns at least one — nothing is left as raw, unparsed
+ * compound text:
+ *   1. Exact match against the email list.
+ *   2. Any real instructor names found embedded inside it (handles
+ *      chains like "Bovine: Timothy Olchowy Avian: Douglas Whiteside").
+ *   3. Initials matching exactly one person.
+ *   4. A clean name pulled out via extractNameCandidates(), added as
+ *      a brand-new instructor even though they have no email on file.
+ *   5. Absolute last resort: the raw text itself.
+ */
+function resolveChunk(text, accessByName, initialsIndex) {
+  const exact = accessByName.get(normalizeNameKey(text));
+  if (exact) return [exact];
+
+  const embedded = findEmbeddedNames(text, accessByName);
+  if (embedded.length > 0) return embedded;
+
+  if (looksLikeInitials(text)) {
+    const candidates = initialsIndex.get(text.trim().toUpperCase()) || [];
+    if (candidates.length === 1) return candidates;
   }
-  return null;
+
+  const extracted = extractNameCandidates(text);
+  if (extracted.length > 0) {
+    return extracted.map((name) => accessByName.get(normalizeNameKey(name)) || { name: name.trim(), email: "", active: true });
+  }
+
+  return [{ name: text.trim(), email: "", active: true }];
+}
+
+/**
+ * Top-level resolver for one raw name/text as it appears in the
+ * spreadsheet. If it contains "or" (e.g. "Garrett Oetelaar or Megan
+ * Murphy"), we don't know which one taught that specific session —
+ * so BOTH get added and BOTH get access to that topic, rather than
+ * leaving it unresolved.
+ */
+function resolveMulti(rawText, accessByName, initialsIndex) {
+  if (/\bor\b/i.test(rawText)) {
+    const segments = rawText.split(/\s+or\s+/i).map((s) => s.trim()).filter(Boolean);
+    return segments.flatMap((seg) => resolveChunk(seg, accessByName, initialsIndex));
+  }
+  return resolveChunk(rawText, accessByName, initialsIndex);
 }
 
 function buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex) {
   const roster = new Map();
-  let counter = 1;
-  let placeholderCount = 0;
+  let newInstructorsWithoutEmail = 0;
 
-  function resolveOne(rawText) {
-    const exact = accessByName.get(normalizeNameKey(rawText));
-    if (exact) return exact;
-    const confident = confidentMatch(rawText, accessByName, initialsIndex);
-    if (confident) return confident;
-    placeholderCount++;
-    return { name: rawText, email: "", active: true };
-  }
-
+  // Stable, deterministic IDs (not a sequential counter): re-importing
+  // the same person or the same unmatched raw text always produces the
+  // SAME instructor ID, so it correctly updates the existing record
+  // instead of creating a duplicate/orphan every time you re-import.
   function ensure(identity) {
     const key = normalizeNameKey(identity.name);
     if (roster.has(key)) return roster.get(key);
-    const id = `I${String(counter++).padStart(3, "0")}`;
+    if (!identity.email) newInstructorsWithoutEmail++;
+    const prefix = identity.email ? "r-" : "p-"; // "r" = real/matched, "p" = added from a topic name, no email on file
+    const id = `${prefix}${slugify(identity.name)}`;
     const record = {
       instructorId: id,
       name: identity.name,
@@ -191,14 +232,17 @@ function buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex) {
       const assignedInstructorIDs = new Set();
 
       function resolveField(names, role) {
-        return names.map((rawText) => {
-          const identity = resolveOne(rawText);
-          const rec = ensure(identity);
-          assignedInstructorIDs.add(rec.instructorId);
-          roles[rec.instructorId] = roles[rec.instructorId] || [];
-          if (!roles[rec.instructorId].includes(role)) roles[rec.instructorId].push(role);
-          return rec.name;
-        });
+        const resolvedNames = [];
+        for (const rawText of names) {
+          for (const identity of resolveMulti(rawText, accessByName, initialsIndex)) {
+            const rec = ensure(identity);
+            assignedInstructorIDs.add(rec.instructorId);
+            roles[rec.instructorId] = roles[rec.instructorId] || [];
+            if (!roles[rec.instructorId].includes(role)) roles[rec.instructorId].push(role);
+            resolvedNames.push(rec.name);
+          }
+        }
+        return resolvedNames;
       }
 
       const primaryResolved = resolveField(primary, "primary");
@@ -219,7 +263,7 @@ function buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex) {
     }
   }
 
-  return { roster, topics, excludedCount, placeholderCount };
+  return { roster, topics, excludedCount, newInstructorsWithoutEmail };
 }
 
 async function uploadInBatches(collectionName, docs, idField, onProgress) {
@@ -248,7 +292,7 @@ export async function importNow(masterListFile, emailsListFile, onProgress = () 
   const initialsIndex = buildInitialsIndex(accessByName);
 
   onProgress("Matching instructor names...");
-  const { roster, topics, excludedCount, placeholderCount } = buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex);
+  const { roster, topics, excludedCount, newInstructorsWithoutEmail } = buildRosterAndTopics(masterRowsByYear, accessByName, initialsIndex);
   const instructors = Array.from(roster.values());
 
   onProgress(`Uploading ${instructors.length} instructors...`);
@@ -262,6 +306,6 @@ export async function importNow(masterListFile, emailsListFile, onProgress = () 
     instructorsWithoutEmail: instructors.filter((i) => !i.email).length,
     totalTopics: topics.length,
     excludedRows: excludedCount,
-    placeholderSlots: placeholderCount,
+    newInstructorsWithoutEmail,
   };
 }
