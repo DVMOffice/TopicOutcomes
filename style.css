@@ -449,12 +449,20 @@ table.outcomes-table select.needs-input { border-color: var(--color-warning); }
 }
 .section-heading .icon { font-size: 1.1em; line-height: 1; }
 
+/* ---------- Two-column layout (e.g. side-by-side progress panels) ---------- */
+.two-col-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
 /* ---------- Responsive layer (applies site-wide) ---------- */
 @media (max-width: 900px) {
   .main-content { padding: var(--space-4); }
   div[style*="grid-template-columns: 2fr 1fr"] {
     grid-template-columns: 1fr !important;
   }
+  .two-col-grid { grid-template-columns: 1fr; }
   .card-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
 
