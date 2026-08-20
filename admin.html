@@ -40,6 +40,8 @@
       <div class="card"><h3 id="stat-complete">0</h3><span class="text-muted">Completed topics</span></div>
       <div class="card"><h3 id="stat-progress">0</h3><span class="text-muted">In progress</span></div>
       <div class="card"><h3 id="stat-missing">0</h3><span class="text-muted">Not started</span></div>
+      <div class="card"><h3 id="stat-instructors">0</h3><span class="text-muted">Total instructors</span></div>
+      <div class="card"><h3 id="stat-outcomes">0</h3><span class="text-muted">Total outcomes written</span></div>
     </div>
 
     <div class="card mb-4">
@@ -140,14 +142,17 @@
       const complete = allTopics.filter((t) => t.completionStatus === "complete").length;
       const inProgress = allTopics.filter((t) => t.completionStatus === "in_progress").length;
       const missing = allTopics.filter((t) => t.completionStatus === "not_started").length;
+      const totalOutcomes = allTopics.reduce((sum, t) => sum + (t.outcomes || []).length, 0);
       const pct = total === 0 ? 0 : Math.round((complete / total) * 100);
 
       $("overall-fill").style.width = `${pct}%`;
-      $("overall-summary").textContent = `${pct}% completo`;
+      $("overall-summary").textContent = `${pct}% complete`;
       $("stat-total").textContent = total;
       $("stat-complete").textContent = complete;
       $("stat-progress").textContent = inProgress;
       $("stat-missing").textContent = missing;
+      $("stat-instructors").textContent = allInstructors.length;
+      $("stat-outcomes").textContent = totalOutcomes;
     }
 
     let instructorProgressRows = [];
