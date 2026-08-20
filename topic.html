@@ -160,15 +160,11 @@
 
       tbody.innerHTML = outcomes
         .map((o) => {
-          const needsInput = !o.species || !o.organSystem;
           const rowClass = justAddedNumbers.has(o.outcomeNumber) ? "outcome-just-added" : "";
           const sameAuthor = o.createdByName === o.updatedByName;
           const metaText = sameAuthor
-            ? `${o.createdByName} · ${timeAgo(o.updatedAt)}`
+            ? `By ${o.createdByName} · ${timeAgo(o.updatedAt)}`
             : `Added by ${o.createdByName}, updated by ${o.updatedByName} · ${timeAgo(o.updatedAt)}`;
-          const warningBadge = needsInput
-            ? `<div class="needs-input-badge">⚠ Pick species &amp; organ system</div>`
-            : "";
           return `
         <tr data-num="${o.outcomeNumber}" class="${rowClass}">
           <td><div class="outcome-num-badge" style="width:22px; height:22px; font-size:11px;">${o.outcomeNumber}</div></td>
@@ -176,7 +172,6 @@
             <div class="outcome-text-display">
               <span>${o.text}</span>
               <div class="outcome-meta">${metaText}</div>
-              ${warningBadge}
               <button class="icon-btn icon-btn-flat edit-text-btn mt-1" data-num="${o.outcomeNumber}" title="Edit text" aria-label="Edit text">${ICON_EDIT}</button>
             </div>
           </td>
