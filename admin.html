@@ -44,16 +44,18 @@
       <div class="card"><h3 id="stat-outcomes">0</h3><span class="text-muted">Total outcomes written</span></div>
     </div>
 
-    <div class="card mb-4">
-      <h3 class="section-heading"><span class="icon">📊</span> Progress by instructor</h3>
-      <input type="search" id="instructor-progress-search" placeholder="🔍 Search instructor name..." class="mt-2 mb-2" />
-      <div id="instructor-progress" style="max-height:340px; overflow-y:auto;"></div>
-    </div>
+    <div class="two-col-grid mb-4">
+      <div class="card">
+        <h3 class="section-heading"><span class="icon">📊</span> Progress by instructor</h3>
+        <input type="search" id="instructor-progress-search" placeholder="🔍 Search instructor name..." class="mt-2 mb-2" />
+        <div id="instructor-progress" style="max-height:340px; overflow-y:auto;"></div>
+      </div>
 
-    <div class="card mb-4">
-      <h3 class="section-heading"><span class="icon">🏫</span> Progress by course</h3>
-      <p class="text-muted mt-1" style="font-size:0.85rem;">For your weekly report — how many topics and outcomes exist per course.</p>
-      <div id="course-progress" class="mt-2" style="max-height:340px; overflow-y:auto;"></div>
+      <div class="card">
+        <h3 class="section-heading"><span class="icon">🏫</span> Progress by course</h3>
+        <p class="text-muted mt-1" style="font-size:0.85rem;">For your weekly report — how many topics and outcomes exist per course.</p>
+        <div id="course-progress" class="mt-2" style="max-height:340px; overflow-y:auto;"></div>
+      </div>
     </div>
 
     <div class="card mb-4" id="dropped-names-section" style="display:none;">
