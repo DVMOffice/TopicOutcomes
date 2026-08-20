@@ -47,6 +47,12 @@
       <div id="instructor-progress"></div>
     </div>
 
+    <div class="card mb-4">
+      <h3 class="section-heading"><span class="icon">🏫</span> Progress by course</h3>
+      <p class="text-muted mt-1" style="font-size:0.85rem;">For your weekly report — how many topics are complete per course.</p>
+      <div id="course-progress" class="mt-2"></div>
+    </div>
+
     <div class="card mb-4" id="dropped-names-section" style="display:none;">
       <h3>Names that couldn't be identified</h3>
       <p class="text-muted">These didn't contain a recognizable person's name (just labels/jargon like "SA Surgeon"), so nobody was assigned — no fake instructor was created. If one of these should map to a real person, add them to the master list with a clearer name and re-import.</p>
@@ -118,6 +124,7 @@
         allInstructors = await getAllInstructors();
         renderStats();
         renderInstructorProgress();
+        renderCourseProgress();
         populateFilterOptions();
         refreshPreview();
       } catch (err) {
@@ -161,6 +168,37 @@
           <span class="flex gap-2" style="align-items:center; width:200px;">
             <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
             <span class="text-muted" style="width:40px; text-align:right;">${r.pct}%</span>
+          </span>
+        </div>
+      `
+        )
+        .join("");
+    }
+
+    function renderCourseProgress() {
+      const byCourse = new Map(); // "Year 1 · Course 206" -> topics[]
+      for (const t of allTopics) {
+        const key = `${t.academicYear} · Course ${t.course}`;
+        if (!byCourse.has(key)) byCourse.set(key, []);
+        byCourse.get(key).push(t);
+      }
+
+      const rows = Array.from(byCourse.entries())
+        .map(([label, topics]) => {
+          const complete = topics.filter((t) => t.completionStatus === "complete").length;
+          const pct = topics.length === 0 ? 0 : Math.round((complete / topics.length) * 100);
+          return { label, complete, total: topics.length, pct };
+        })
+        .sort((a, b) => a.label.localeCompare(b.label));
+
+      $("course-progress").innerHTML = rows
+        .map(
+          (r) => `
+        <div class="flex-between mt-2">
+          <span>${r.label}</span>
+          <span class="flex gap-2" style="align-items:center; width:260px;">
+            <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
+            <span class="text-muted" style="width:90px; text-align:right; font-size:0.85rem;">${r.complete} of ${r.total} (${r.pct}%)</span>
           </span>
         </div>
       `
@@ -226,6 +264,7 @@
       allInstructors = await getAllInstructors();
       renderStats();
       renderInstructorProgress();
+      renderCourseProgress();
       populateFilterOptions();
       refreshPreview();
     });
