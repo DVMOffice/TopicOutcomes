@@ -69,7 +69,7 @@ export function listenToTopic(topicId, callback) {
 // ESCRITURA DE RESULTADOS DE APRENDIZAJE (colaborativo)
 // ================================================================
 
-export async function addOutcome(topicId, { text, instructorId, instructorName }) {
+export async function addOutcome(topicId, { text, species, organSystem, instructorId, instructorName }) {
   const ref = doc(db, "topics", topicId);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
@@ -80,6 +80,8 @@ export async function addOutcome(topicId, { text, instructorId, instructorName }
     const newOutcome = {
       outcomeNumber: outcomes.length + 1,
       text: text.trim(),
+      species: species || "",
+      organSystem: organSystem || "",
       createdBy: instructorId,
       createdByName: instructorName,
       createdAt: now,
@@ -99,7 +101,46 @@ export async function addOutcome(topicId, { text, instructorId, instructorName }
   });
 }
 
-export async function updateOutcome(topicId, outcomeNumber, { text, instructorId, instructorName }) {
+/**
+ * Adds several outcomes at once (e.g. pasted from a document), all in
+ * a single transaction. `texts` is an array of already-split outcome
+ * strings; species/organSystem apply to all of them (edit individually
+ * afterward if a specific one needs something different).
+ */
+export async function addOutcomesBulk(topicId, texts, { species, organSystem, instructorId, instructorName }) {
+  if (!texts || texts.length === 0) return;
+  const ref = doc(db, "topics", topicId);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error("Topic not found");
+    const data = snap.data();
+    const outcomes = data.outcomes || [];
+    const now = Timestamp.now();
+    const newOutcomes = texts.map((text, i) => ({
+      outcomeNumber: outcomes.length + i + 1,
+      text: text.trim(),
+      species: species || "",
+      organSystem: organSystem || "",
+      createdBy: instructorId,
+      createdByName: instructorName,
+      createdAt: now,
+      updatedBy: instructorId,
+      updatedByName: instructorName,
+      updatedAt: now,
+    }));
+    const updatedOutcomes = [...outcomes, ...newOutcomes];
+    tx.update(ref, {
+      outcomes: updatedOutcomes,
+      completionStatus: computeStatus(updatedOutcomes),
+      activityHistory: [
+        activityEntry(`added ${texts.length} outcomes`, instructorId, instructorName),
+        ...(data.activityHistory || []).slice(0, 49),
+      ],
+    });
+  });
+}
+
+export async function updateOutcome(topicId, outcomeNumber, { text, species, organSystem, instructorId, instructorName }) {
   const ref = doc(db, "topics", topicId);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
@@ -112,6 +153,8 @@ export async function updateOutcome(topicId, outcomeNumber, { text, instructorId
     outcomes[idx] = {
       ...outcomes[idx],
       text: text.trim(),
+      species: species !== undefined ? species : outcomes[idx].species || "",
+      organSystem: organSystem !== undefined ? organSystem : outcomes[idx].organSystem || "",
       updatedBy: instructorId,
       updatedByName: instructorName,
       updatedAt: Timestamp.now(),
@@ -171,7 +214,7 @@ export function topicPercent(topic) {
 const EXPORT_COLUMNS = [
   "Academic Year", "Course", "Topic",
   "Primary Instructor", "Secondary Instructor", "Finalized Instructor",
-  "Completion Status", "Outcome Number", "Outcome Text",
+  "Completion Status", "Outcome Number", "Outcome Text", "Species", "Organ System",
   "Added By", "Added Date", "Last Updated By", "Last Updated Date",
 ];
 
@@ -208,7 +251,7 @@ export function flattenToRows(topics) {
     };
 
     if (!t.outcomes || t.outcomes.length === 0) {
-      rows.push({ ...base, "Outcome Number": "", "Outcome Text": "", "Added By": "", "Added Date": "", "Last Updated By": "", "Last Updated Date": "" });
+      rows.push({ ...base, "Outcome Number": "", "Outcome Text": "", Species: "", "Organ System": "", "Added By": "", "Added Date": "", "Last Updated By": "", "Last Updated Date": "" });
       continue;
     }
     for (const o of t.outcomes) {
@@ -216,6 +259,8 @@ export function flattenToRows(topics) {
         ...base,
         "Outcome Number": o.outcomeNumber,
         "Outcome Text": o.text,
+        Species: o.species || "",
+        "Organ System": o.organSystem || "",
         "Added By": o.createdByName,
         "Added Date": toISO(o.createdAt),
         "Last Updated By": o.updatedByName,
