@@ -26,11 +26,50 @@
         <p class="text-muted mt-1" id="outcomes-subheading">There is no minimum or maximum — click "Add outcome" to add as many as you need.</p>
         <div id="outcomes-list"></div>
 
-        <div class="form-group mt-4" id="new-outcome-form">
-          <label for="new-outcome-text">New learning outcome</label>
-          <textarea id="new-outcome-text" placeholder="Students will be able to..."></textarea>
-          <button class="btn btn-primary mt-2" id="btn-add-outcome">+ Add outcome</button>
-          <p id="outcome-msg" class="text-muted mt-2"></p>
+        <div class="mt-4">
+          <div class="flex gap-2 mb-2">
+            <button class="btn btn-secondary" id="btn-mode-single">One at a time</button>
+            <button class="btn btn-secondary" id="btn-mode-bulk">Paste multiple</button>
+          </div>
+
+          <div id="new-outcome-form">
+            <div class="form-group">
+              <label for="new-outcome-text">New learning outcome</label>
+              <textarea id="new-outcome-text" placeholder="Students will be able to..."></textarea>
+            </div>
+            <div class="flex gap-2">
+              <div class="form-group" style="flex:1;">
+                <label for="new-outcome-species">Species</label>
+                <select id="new-outcome-species"></select>
+              </div>
+              <div class="form-group" style="flex:1;">
+                <label for="new-outcome-system">Organ System</label>
+                <select id="new-outcome-system"></select>
+              </div>
+            </div>
+            <button class="btn btn-primary mt-2" id="btn-add-outcome">+ Add outcome</button>
+            <p id="outcome-msg" class="text-muted mt-2"></p>
+          </div>
+
+          <div id="bulk-outcome-form" style="display:none;">
+            <div class="form-group">
+              <label for="bulk-outcome-text">Paste your outcomes — one per line</label>
+              <textarea id="bulk-outcome-text" style="min-height:140px;" placeholder="Students will be able to identify cell organelles.&#10;Students will be able to explain membrane functions.&#10;..."></textarea>
+              <p class="text-muted mt-1" style="font-size:0.85rem;">Numbers or bullets at the start of a line (like "1." or "-") are removed automatically.</p>
+            </div>
+            <div class="flex gap-2">
+              <div class="form-group" style="flex:1;">
+                <label for="bulk-outcome-species">Species (applies to all — edit individually after if needed)</label>
+                <select id="bulk-outcome-species"></select>
+              </div>
+              <div class="form-group" style="flex:1;">
+                <label for="bulk-outcome-system">Organ System (applies to all)</label>
+                <select id="bulk-outcome-system"></select>
+              </div>
+            </div>
+            <button class="btn btn-primary mt-2" id="btn-add-bulk">+ Add all pasted outcomes</button>
+            <p id="bulk-outcome-msg" class="text-muted mt-2"></p>
+          </div>
         </div>
       </div>
 
@@ -51,9 +90,28 @@
        Identity -> app.js. Everything about outcomes/activity -> dataEngine.js -->
   <script type="module">
     import { onAuthChange, getCurrentInstructor, getAllInstructors } from "./app.js";
-    import { listenToTopic, addOutcome, updateOutcome, deleteOutcome } from "./dataEngine.js";
+    import { listenToTopic, addOutcome, addOutcomesBulk, updateOutcome, deleteOutcome } from "./dataEngine.js";
+
+    const SPECIES_LIST = [
+      "Equine", "Bovine", "Small Animal", "Wildlife", "Lab Animal", "Exotics",
+      "Other Livestock", "All/multiple/comparative", "N/A",
+    ];
+    const ORGAN_SYSTEM_LIST = [
+      "Respiratory system", "Integumentary System", "Musculoskeletal System", "Nervous System",
+      "Endocrine System", "Cardiovascular System", "Hematolymphatic System", "Digestive System",
+      "Urinary System", "Reproductive System", "Sensory system", "Hepatobiliary System",
+      "Multiple System", "All / systemic", "N/A",
+    ];
 
     const $ = (id) => document.getElementById(id);
+
+    function fillSelect(select, options) {
+      select.innerHTML = options.map((o) => `<option value="${o}">${o}</option>`).join("");
+    }
+    fillSelect($("new-outcome-species"), SPECIES_LIST);
+    fillSelect($("new-outcome-system"), ORGAN_SYSTEM_LIST);
+    fillSelect($("bulk-outcome-species"), SPECIES_LIST);
+    fillSelect($("bulk-outcome-system"), ORGAN_SYSTEM_LIST);
 
     let saveToastTimeout;
     function showSaved() {
@@ -62,6 +120,17 @@
       clearTimeout(saveToastTimeout);
       saveToastTimeout = setTimeout(() => { toast.style.display = "none"; }, 1500);
     }
+
+    // --- Toggle between "one at a time" and "paste multiple" ---
+    $("btn-mode-single").addEventListener("click", () => {
+      $("new-outcome-form").style.display = "block";
+      $("bulk-outcome-form").style.display = "none";
+    });
+    $("btn-mode-bulk").addEventListener("click", () => {
+      $("new-outcome-form").style.display = "none";
+      $("bulk-outcome-form").style.display = "block";
+    });
+
     const topicId = new URLSearchParams(window.location.search).get("id");
 
     let currentInstructor = null;
@@ -78,21 +147,43 @@
       return date.toLocaleDateString();
     }
 
+    // Splits pasted text into individual outcome lines, stripping
+    // leading numbering/bullets like "1." "1)" "-" "•".
+    function parseBulkLines(text) {
+      return text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => line.replace(/^(\d+[.)]|[-•*])\s*/, "").trim())
+        .filter((line) => line.length > 0);
+    }
+
+    function outcomeMetaBadges(o) {
+      const parts = [];
+      if (o.species) parts.push(o.species);
+      if (o.organSystem) parts.push(o.organSystem);
+      if (parts.length === 0) return "";
+      return `<div class="mt-1">${parts.map((p) => `<span class="badge" style="background:var(--color-border); color:var(--color-text-muted); margin-right:6px;">${p}</span>`).join("")}</div>`;
+    }
+
     function renderOutcomes(topic) {
       const list = $("outcomes-list");
       const outcomes = topic.outcomes || [];
       list.innerHTML = outcomes
         .map(
           (o) => `
-        <div class="outcome-item">
+        <div class="outcome-item" data-num="${o.outcomeNumber}">
           <div class="flex gap-2" style="align-items:flex-start;">
             <strong style="min-width:22px;">${o.outcomeNumber}.</strong>
             <div style="flex:1;">
-              <p style="margin:0;">${o.text}</p>
-              <div class="outcome-meta">Added by ${o.createdByName} · Updated by ${o.updatedByName} (${timeAgo(o.updatedAt)})</div>
-              <div class="flex gap-2 mt-2">
-                <button class="btn btn-secondary edit-outcome" data-num="${o.outcomeNumber}">Edit</button>
-                <button class="btn btn-danger delete-outcome" data-num="${o.outcomeNumber}">Delete</button>
+              <div class="outcome-display">
+                <p style="margin:0;">${o.text}</p>
+                ${outcomeMetaBadges(o)}
+                <div class="outcome-meta">Added by ${o.createdByName} · Updated by ${o.updatedByName} (${timeAgo(o.updatedAt)})</div>
+                <div class="flex gap-2 mt-2">
+                  <button class="btn btn-secondary edit-outcome" data-num="${o.outcomeNumber}">Edit</button>
+                  <button class="btn btn-danger delete-outcome" data-num="${o.outcomeNumber}">Delete</button>
+                </div>
               </div>
             </div>
           </div>
@@ -102,14 +193,7 @@
         .join("");
 
       list.querySelectorAll(".edit-outcome").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const num = Number(btn.dataset.num);
-          const current = outcomes.find((o) => o.outcomeNumber === num);
-          const text = window.prompt("Edit outcome:", current.text);
-          if (text === null) return;
-          await updateOutcome(topicId, num, { text, instructorId: currentInstructor.instructorId, instructorName: currentInstructor.name });
-          showSaved();
-        });
+        btn.addEventListener("click", () => startEditingOutcome(Number(btn.dataset.num), outcomes));
       });
 
       list.querySelectorAll(".delete-outcome").forEach((btn) => {
@@ -119,6 +203,62 @@
           showSaved();
         });
       });
+    }
+
+    // Replaces one outcome's display with an inline editable form
+    // (text + species + organ system dropdowns), so species/system can
+    // be changed too, not just the text.
+    function startEditingOutcome(num, outcomes) {
+      const current = outcomes.find((o) => o.outcomeNumber === num);
+      const container = document.querySelector(`.outcome-item[data-num="${num}"] .outcome-display`);
+      if (!current || !container) return;
+
+      container.innerHTML = `
+        <div class="form-group">
+          <textarea class="edit-text">${current.text}</textarea>
+        </div>
+        <div class="flex gap-2">
+          <div class="form-group" style="flex:1;">
+            <label>Species</label>
+            <select class="edit-species"></select>
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>Organ System</label>
+            <select class="edit-system"></select>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-primary save-edit">Save</button>
+          <button class="btn btn-secondary cancel-edit">Cancel</button>
+        </div>
+      `;
+
+      const speciesSelect = container.querySelector(".edit-species");
+      const systemSelect = container.querySelector(".edit-system");
+      fillSelect(speciesSelect, SPECIES_LIST);
+      fillSelect(systemSelect, ORGAN_SYSTEM_LIST);
+      speciesSelect.value = current.species || "N/A";
+      systemSelect.value = current.organSystem || "N/A";
+
+      container.querySelector(".cancel-edit").addEventListener("click", () => renderOutcomesFromCache());
+
+      container.querySelector(".save-edit").addEventListener("click", async () => {
+        const text = container.querySelector(".edit-text").value.trim();
+        if (!text) return;
+        await updateOutcome(topicId, num, {
+          text,
+          species: speciesSelect.value,
+          organSystem: systemSelect.value,
+          instructorId: currentInstructor.instructorId,
+          instructorName: currentInstructor.name,
+        });
+        showSaved();
+      });
+    }
+
+    let latestTopic = null;
+    function renderOutcomesFromCache() {
+      if (latestTopic) renderOutcomes(latestTopic);
     }
 
     function renderActivity(topic) {
@@ -149,12 +289,40 @@
       if (!text) return;
       $("outcome-msg").textContent = "Saving...";
       try {
-        await addOutcome(topicId, { text, instructorId: currentInstructor.instructorId, instructorName: currentInstructor.name });
+        await addOutcome(topicId, {
+          text,
+          species: $("new-outcome-species").value,
+          organSystem: $("new-outcome-system").value,
+          instructorId: currentInstructor.instructorId,
+          instructorName: currentInstructor.name,
+        });
         $("new-outcome-text").value = "";
         $("outcome-msg").textContent = "";
         showSaved();
       } catch (err) {
         $("outcome-msg").textContent = err.message;
+      }
+    });
+
+    $("btn-add-bulk").addEventListener("click", async () => {
+      const lines = parseBulkLines($("bulk-outcome-text").value);
+      if (lines.length === 0) {
+        $("bulk-outcome-msg").textContent = "Paste at least one line first.";
+        return;
+      }
+      $("bulk-outcome-msg").textContent = "Saving...";
+      try {
+        await addOutcomesBulk(topicId, lines, {
+          species: $("bulk-outcome-species").value,
+          organSystem: $("bulk-outcome-system").value,
+          instructorId: currentInstructor.instructorId,
+          instructorName: currentInstructor.name,
+        });
+        $("bulk-outcome-text").value = "";
+        $("bulk-outcome-msg").textContent = `Added ${lines.length} outcome(s).`;
+        showSaved();
+      } catch (err) {
+        $("bulk-outcome-msg").textContent = err.message;
       }
     });
 
@@ -165,6 +333,7 @@
 
       if (unsubscribe) unsubscribe();
       unsubscribe = listenToTopic(topicId, (topic) => {
+        latestTopic = topic;
         renderHeader(topic);
         renderOutcomes(topic);
         renderActivity(topic);
