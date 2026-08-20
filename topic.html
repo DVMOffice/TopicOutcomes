@@ -16,47 +16,47 @@
   <div class="main-content">
     <div class="card mb-4">
       <span class="text-muted" id="topic-breadcrumb"></span>
-      <h2 id="topic-title">Loading...</h2>
+      <h2 id="topic-title" style="margin-top:4px;">Loading...</h2>
       <span class="badge" id="topic-status-badge"></span>
     </div>
 
     <div style="display:grid; grid-template-columns: 2fr 1fr; gap: 24px;">
       <div class="card">
-        <h3 id="outcomes-heading">Please fill in the learning outcomes</h3>
-        <p class="text-muted mt-1" id="outcomes-subheading">There is no minimum or maximum. Add as many as you need below.</p>
+        <h3 id="outcomes-heading" class="section-heading"><span class="icon">📋</span> Learning outcomes</h3>
 
-        <div style="overflow-x:auto;">
-          <table class="data-table" id="outcomes-table">
+        <div class="table-scroll">
+          <table class="outcomes-table" id="outcomes-table">
             <thead>
               <tr>
-                <th style="width:36px;">#</th>
-                <th>Learning Outcome</th>
-                <th style="width:160px;">Species</th>
-                <th style="width:200px;">Organ System</th>
-                <th style="width:70px;"></th>
+                <th style="width:32px;">#</th>
+                <th>Learning outcome</th>
+                <th style="width:150px;">Species</th>
+                <th style="width:170px;">Organ system</th>
+                <th style="width:64px;"></th>
               </tr>
             </thead>
             <tbody id="outcomes-tbody"></tbody>
           </table>
         </div>
 
-        <div class="mt-4">
-          <label for="add-outcomes-text">Add outcomes — one per line, or paste several at once</label>
-          <textarea id="add-outcomes-text" style="min-height:110px;" placeholder="Students will be able to identify cell organelles.&#10;Students will be able to explain membrane functions.&#10;..."></textarea>
-          <p class="text-muted mt-1" style="font-size:0.85rem;">Numbers or bullets at the start of a line (like "1." or "-") are removed automatically. Paste one outcome or many — both work the same way.</p>
-          <button class="btn btn-primary mt-2" id="btn-add-outcomes">+ Add Outcomes</button>
-          <p id="outcome-msg" class="text-muted mt-2"></p>
+        <div class="mt-4" style="padding-top:var(--space-4); border-top:1px solid var(--color-border);">
+          <label for="add-outcomes-text" class="section-heading" style="font-size:var(--font-size-md);"><span class="icon">✏️</span> Add outcomes</label>
+          <textarea id="add-outcomes-text" class="mt-2" style="min-height:80px;" placeholder="Type one, or paste your whole list here (one per line)..."></textarea>
+          <div class="flex-between mt-2" style="align-items:center;">
+            <button class="btn btn-primary" id="btn-add-outcomes">+ Add outcome</button>
+            <p id="outcome-msg" class="text-muted" style="margin:0;"></p>
+          </div>
         </div>
       </div>
 
       <div>
         <div class="card mb-4">
-          <h3>Collaborators</h3>
-          <div id="collaborators-list"></div>
+          <h3 class="section-heading"><span class="icon">👥</span> Collaborators</h3>
+          <div id="collaborators-list" class="mt-2"></div>
         </div>
         <div class="card">
-          <h3>Recent activity</h3>
-          <div id="activity-feed"></div>
+          <h3 class="section-heading"><span class="icon">🕐</span> Recent activity</h3>
+          <div id="activity-feed" class="mt-2"></div>
         </div>
       </div>
     </div>
@@ -79,10 +79,14 @@
       "Multiple System", "All / systemic", "N/A",
     ];
 
+    // Drawn icons (not an icon font) so they always render, on any device.
+    const ICON_EDIT = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>`;
+    const ICON_DELETE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
+
     const $ = (id) => document.getElementById(id);
 
-    function optionsHtml(list, selected) {
-      const opts = [`<option value="" ${!selected ? "selected" : ""}>Select...</option>`];
+    function optionsHtml(list, selected, placeholder) {
+      const opts = [`<option value="" ${!selected ? "selected" : ""}>${placeholder}</option>`];
       for (const item of list) {
         opts.push(`<option value="${item}" ${selected === item ? "selected" : ""}>${item}</option>`);
       }
@@ -101,6 +105,7 @@
     let currentInstructor = null;
     let unsubscribe = null;
     let latestTopic = null;
+    let justAddedNumbers = new Set(); // briefly highlights newly added rows
 
     function timeAgo(ts) {
       if (!ts) return "";
@@ -115,7 +120,7 @@
 
     // Splits pasted text into individual outcome lines, stripping
     // leading numbering/bullets like "1." "1)" "-" "•". Works the
-    // same whether there's one line or many.
+    // same whether there's one line or many — no mode to choose.
     function parseOutcomeLines(text) {
       return text
         .split(/\r?\n/)
@@ -144,35 +149,43 @@
       const outcomes = topic.outcomes || [];
 
       if (outcomes.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="text-muted">No outcomes yet — add the first one below.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="text-muted" style="padding:var(--space-4) 0;">No outcomes yet — add the first one below.</td></tr>`;
         return;
       }
 
       tbody.innerHTML = outcomes
-        .map(
-          (o) => `
-        <tr data-num="${o.outcomeNumber}">
-          <td>${o.outcomeNumber}</td>
+        .map((o) => {
+          const needsInput = !o.species || !o.organSystem;
+          const rowClass = justAddedNumbers.has(o.outcomeNumber) ? "outcome-just-added" : needsInput ? "outcome-needs-input" : "";
+          return `
+        <tr data-num="${o.outcomeNumber}" class="${rowClass}">
+          <td><div class="outcome-num-badge" style="width:22px; height:22px; font-size:11px;">${o.outcomeNumber}</div></td>
           <td class="outcome-text-cell">
             <div class="outcome-text-display">
               <span>${o.text}</span>
               <div class="outcome-meta">Added by ${o.createdByName} · Updated by ${o.updatedByName} (${timeAgo(o.updatedAt)})</div>
-              <button class="btn btn-secondary edit-text-btn mt-1" data-num="${o.outcomeNumber}" style="font-size:0.8rem; padding:4px 10px;">Edit text</button>
+              <button class="icon-btn icon-btn-flat edit-text-btn mt-1" data-num="${o.outcomeNumber}" title="Edit text" aria-label="Edit text">${ICON_EDIT}</button>
             </div>
           </td>
-          <td><select class="species-select" data-num="${o.outcomeNumber}">${optionsHtml(SPECIES_LIST, o.species)}</select></td>
-          <td><select class="system-select" data-num="${o.outcomeNumber}">${optionsHtml(ORGAN_SYSTEM_LIST, o.organSystem)}</select></td>
-          <td><button class="btn btn-danger delete-outcome" data-num="${o.outcomeNumber}" style="font-size:0.8rem; padding:4px 10px;">Delete</button></td>
+          <td><select class="species-select ${!o.species ? "needs-input" : ""}" data-num="${o.outcomeNumber}">${optionsHtml(SPECIES_LIST, o.species, "Select...")}</select></td>
+          <td><select class="system-select ${!o.organSystem ? "needs-input" : ""}" data-num="${o.outcomeNumber}">${optionsHtml(ORGAN_SYSTEM_LIST, o.organSystem, "Select...")}</select></td>
+          <td><button class="icon-btn icon-btn-flat icon-btn-danger delete-outcome" data-num="${o.outcomeNumber}" title="Delete" aria-label="Delete outcome">${ICON_DELETE}</button></td>
         </tr>
-      `
-        )
+      `;
+        })
         .join("");
 
       tbody.querySelectorAll(".species-select").forEach((sel) => {
-        sel.addEventListener("change", () => saveField(Number(sel.dataset.num), { species: sel.value }));
+        sel.addEventListener("change", () => {
+          sel.classList.toggle("needs-input", !sel.value);
+          saveField(Number(sel.dataset.num), { species: sel.value });
+        });
       });
       tbody.querySelectorAll(".system-select").forEach((sel) => {
-        sel.addEventListener("change", () => saveField(Number(sel.dataset.num), { organSystem: sel.value }));
+        sel.addEventListener("change", () => {
+          sel.classList.toggle("needs-input", !sel.value);
+          saveField(Number(sel.dataset.num), { organSystem: sel.value });
+        });
       });
       tbody.querySelectorAll(".delete-outcome").forEach((btn) => {
         btn.addEventListener("click", async () => {
@@ -188,14 +201,14 @@
 
     function startEditingText(num) {
       const current = (latestTopic.outcomes || []).find((o) => o.outcomeNumber === num);
-      const cell = document.querySelector(`tr[data-num="${num}"] .outcome-text-cell`);
+      const cell = document.querySelector(`tr[data-num="${num}"] .outcome-text-cell .outcome-text-display`);
       if (!current || !cell) return;
 
       cell.innerHTML = `
-        <textarea class="edit-text-input">${current.text}</textarea>
-        <div class="flex gap-2 mt-1">
-          <button class="btn btn-primary save-text-btn" style="font-size:0.8rem; padding:4px 10px;">Save</button>
-          <button class="btn btn-secondary cancel-text-btn" style="font-size:0.8rem; padding:4px 10px;">Cancel</button>
+        <textarea class="edit-text-input" style="min-height:70px;">${current.text}</textarea>
+        <div class="flex gap-2 mt-2">
+          <button class="btn btn-primary save-text-btn" style="font-size:0.8rem; padding:6px 14px;">Save</button>
+          <button class="btn btn-secondary cancel-text-btn" style="font-size:0.8rem; padding:6px 14px;">Cancel</button>
         </div>
       `;
       cell.querySelector(".cancel-text-btn").addEventListener("click", () => renderOutcomes(latestTopic));
@@ -223,7 +236,6 @@
     function renderHeader(topic) {
       $("topic-breadcrumb").textContent = `${topic.academicYear} · Course ${topic.course}`;
       $("topic-title").textContent = topic.topicName;
-      $("outcomes-heading").textContent = `Please fill in the "${topic.topicName}" learning outcomes`;
       const badge = $("topic-status-badge");
       badge.textContent = topic.completionStatus.replace("_", " ");
       badge.className = `badge badge-${topic.completionStatus.replace("_", "-")}`;
@@ -237,12 +249,15 @@
       }
       $("outcome-msg").textContent = "Saving...";
       try {
+        const startNum = (latestTopic.outcomes || []).length + 1;
         await addOutcomesBulk(topicId, lines, {
           species: "",
           organSystem: "",
           instructorId: currentInstructor.instructorId,
           instructorName: currentInstructor.name,
         });
+        justAddedNumbers = new Set(lines.map((_, i) => startNum + i));
+        setTimeout(() => { justAddedNumbers = new Set(); renderOutcomes(latestTopic); }, 2500);
         $("add-outcomes-text").value = "";
         $("outcome-msg").textContent = "";
         showSaved();
