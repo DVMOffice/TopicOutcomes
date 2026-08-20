@@ -15,9 +15,14 @@
 
   <div class="main-content">
     <div class="card mb-4">
-      <span class="text-muted" id="topic-breadcrumb"></span>
-      <h2 id="topic-title" style="margin-top:4px;">Loading...</h2>
-      <span class="badge" id="topic-status-badge"></span>
+      <div class="flex-between" style="align-items:flex-start; flex-wrap:wrap; gap:12px;">
+        <div>
+          <span class="text-muted" id="topic-breadcrumb"></span>
+          <h2 id="topic-title" style="margin-top:4px;">Loading...</h2>
+          <span class="badge" id="topic-status-badge"></span>
+        </div>
+        <div class="flex gap-2" id="topic-nav" style="flex-shrink:0;"></div>
+      </div>
     </div>
 
     <div style="display:grid; grid-template-columns: 2fr 1fr; gap: 24px;">
@@ -66,7 +71,7 @@
        Identity -> app.js. Everything about outcomes/activity -> dataEngine.js -->
   <script type="module">
     import { onAuthChange, getCurrentInstructor, getAllInstructors } from "./app.js";
-    import { listenToTopic, addOutcomesBulk, updateOutcome, deleteOutcome } from "./dataEngine.js";
+    import { listenToTopic, addOutcomesBulk, updateOutcome, deleteOutcome, getTopicsForInstructor } from "./dataEngine.js";
 
     const SPECIES_LIST = [
       "Equine", "Bovine", "Small Animal", "Wildlife", "Lab Animal", "Exotics",
@@ -156,14 +161,22 @@
       tbody.innerHTML = outcomes
         .map((o) => {
           const needsInput = !o.species || !o.organSystem;
-          const rowClass = justAddedNumbers.has(o.outcomeNumber) ? "outcome-just-added" : needsInput ? "outcome-needs-input" : "";
+          const rowClass = justAddedNumbers.has(o.outcomeNumber) ? "outcome-just-added" : "";
+          const sameAuthor = o.createdByName === o.updatedByName;
+          const metaText = sameAuthor
+            ? `${o.createdByName} · ${timeAgo(o.updatedAt)}`
+            : `Added by ${o.createdByName}, updated by ${o.updatedByName} · ${timeAgo(o.updatedAt)}`;
+          const warningBadge = needsInput
+            ? `<div class="needs-input-badge">⚠ Pick species &amp; organ system</div>`
+            : "";
           return `
         <tr data-num="${o.outcomeNumber}" class="${rowClass}">
           <td><div class="outcome-num-badge" style="width:22px; height:22px; font-size:11px;">${o.outcomeNumber}</div></td>
           <td class="outcome-text-cell">
             <div class="outcome-text-display">
               <span>${o.text}</span>
-              <div class="outcome-meta">Added by ${o.createdByName} · Updated by ${o.updatedByName} (${timeAgo(o.updatedAt)})</div>
+              <div class="outcome-meta">${metaText}</div>
+              ${warningBadge}
               <button class="icon-btn icon-btn-flat edit-text-btn mt-1" data-num="${o.outcomeNumber}" title="Edit text" aria-label="Edit text">${ICON_EDIT}</button>
             </div>
           </td>
@@ -266,10 +279,32 @@
       }
     });
 
+    async function renderTopicNav() {
+      const myTopics = await getTopicsForInstructor(currentInstructor.instructorId);
+      myTopics.sort((a, b) =>
+        a.academicYear.localeCompare(b.academicYear) ||
+        String(a.course).localeCompare(String(b.course)) ||
+        a.topicName.localeCompare(b.topicName)
+      );
+      const idx = myTopics.findIndex((t) => t.id === topicId);
+      if (idx === -1) return;
+
+      const prev = idx > 0 ? myTopics[idx - 1] : null;
+      const next = idx < myTopics.length - 1 ? myTopics[idx + 1] : null;
+
+      $("topic-nav").innerHTML = `
+        <span class="text-muted" style="font-size:0.85rem; align-self:center;">${idx + 1} of ${myTopics.length}</span>
+        ${prev ? `<a href="topic.html?id=${prev.id}" class="btn btn-secondary" style="font-size:0.85rem; padding:6px 12px;">‹ Previous</a>` : ""}
+        ${next ? `<a href="topic.html?id=${next.id}" class="btn btn-secondary" style="font-size:0.85rem; padding:6px 12px;">Next ›</a>` : ""}
+      `;
+    }
+
     onAuthChange(async (user) => {
       if (!user || !topicId) { window.location.href = "index.html"; return; }
       currentInstructor = await getCurrentInstructor(user);
       if (!currentInstructor) { window.location.href = "index.html"; return; }
+
+      renderTopicNav();
 
       if (unsubscribe) unsubscribe();
       unsubscribe = listenToTopic(topicId, (topic) => {
