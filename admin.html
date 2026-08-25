@@ -9,7 +9,7 @@
 </head>
 <body>
   <div class="topbar">
-    <h1>UCVM Learning Outcomes — Admin</h1>
+    <h1 id="home-link" style="cursor:pointer;" title="Back to home">UCVM Learning Outcomes — Admin</h1>
     <a href="dashboard.html" style="color:#fff;">Instructor view</a>
   </div>
 
@@ -113,7 +113,7 @@
   <!-- Logic for this page: stats, filters, and export.
        Instructors -> app.js. Topics/filters/export -> dataEngine.js -->
   <script type="module">
-    import { getAllInstructors, onAuthChange, isCurrentUserAdmin, TEAM_IDS } from "./app.js";
+    import { getAllInstructors, onAuthChange, isCurrentUserAdmin, TEAM_IDS, logOut } from "./app.js";
     import {
       getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible,
       getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV, assignInstructorToTeam,
@@ -122,6 +122,11 @@
     import { importNow } from "./importEngine.js";
 
     const $ = (id) => document.getElementById(id);
+
+    $("home-link").addEventListener("click", async () => {
+      await logOut();
+      window.location.href = "index.html";
+    });
     let allTopics = [];
     let allInstructors = [];
 
