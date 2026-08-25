@@ -19,8 +19,29 @@
         </div>
         <div id="search-results"></div>
         <p class="text-muted mt-4" style="text-align:center; font-size: 0.8rem;">
+          <a href="#" id="link-show-team">Support team access</a>
+          &nbsp;·&nbsp;
           <a href="#" id="link-show-admin">Administrator access</a>
         </p>
+      </div>
+
+      <div id="step-team" style="display:none;">
+        <div class="form-group mt-4">
+          <label for="team-select">Your team</label>
+          <select id="team-select">
+            <option value="Team A">Team A</option>
+            <option value="Team B">Team B</option>
+            <option value="Team C">Team C</option>
+            <option value="Team D">Team D</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="team-code">Team code</label>
+          <input type="text" id="team-code" placeholder="Team code" />
+        </div>
+        <button class="btn btn-primary btn-block" id="btn-team-continue">Continue</button>
+        <p id="team-msg" class="text-muted mt-2"></p>
+        <button class="btn btn-secondary btn-block mt-2" id="btn-back-team">Back</button>
       </div>
 
       <div id="step-admin" style="display:none;">
@@ -35,25 +56,28 @@
     </div>
   </div>
 
-  <!-- Logic for this page: instructor name search + admin code.
+  <!-- Logic for this page: instructor name search + team code + admin code.
        Everything shared lives in app.js -->
   <script type="module">
     import {
       searchInstructorsByName,
       signInAsInstructor,
       signInAsAdmin,
+      signInAsTeam,
       onAuthChange,
     } from "./app.js";
 
     const $ = (id) => document.getElementById(id);
 
     function showStep(id) {
-      ["step-search", "step-admin"].forEach((s) => {
+      ["step-search", "step-team", "step-admin"].forEach((s) => {
         $(s).style.display = s === id ? "block" : "none";
       });
     }
 
+    $("link-show-team").addEventListener("click", (e) => { e.preventDefault(); showStep("step-team"); });
     $("link-show-admin").addEventListener("click", (e) => { e.preventDefault(); showStep("step-admin"); });
+    $("btn-back-team").addEventListener("click", () => showStep("step-search"));
     $("btn-back-admin").addEventListener("click", () => showStep("step-search"));
 
     // --- Instructor: search name, click it, done ---
@@ -77,6 +101,17 @@
       }, 250);
     });
 
+    // --- Support team code ---
+    $("btn-team-continue").addEventListener("click", async () => {
+      $("team-msg").textContent = "Checking...";
+      try {
+        await signInAsTeam($("team-select").value, $("team-code").value);
+        window.location.href = "team-dashboard.html";
+      } catch (err) {
+        $("team-msg").textContent = err.message;
+      }
+    });
+
     // --- Admin code ---
     $("btn-admin-continue").addEventListener("click", async () => {
       $("admin-msg").textContent = "Checking...";
@@ -93,6 +128,8 @@
       if (!user) return;
       if (window.sessionStorage.getItem("isAdmin") === "true") {
         window.location.href = "admin.html";
+      } else if (window.sessionStorage.getItem("teamId")) {
+        window.location.href = "team-dashboard.html";
       } else if (window.sessionStorage.getItem("guestInstructorId")) {
         window.location.href = "dashboard.html";
       }
