@@ -58,6 +58,23 @@
       </div>
     </div>
 
+    <div class="card mb-4">
+      <h3 class="section-heading"><span class="icon">🧑‍🤝‍🧑</span> Progress by team</h3>
+      <p class="text-muted mt-1" style="font-size:0.85rem;">Team A/B/C/D are roles, not specific people — swap who's covering a team anytime without touching this.</p>
+      <div id="team-progress" class="mt-2"></div>
+    </div>
+
+    <div class="card mb-4">
+      <h3 class="section-heading"><span class="icon">🏷️</span> Assign instructors to a team</h3>
+      <p class="text-muted mt-1" style="font-size:0.85rem;">Auto-assign balances the 4 teams by topic count using your live data right now — busiest instructors get spread out first. You'll see the result before anything is saved.</p>
+      <button class="btn btn-primary mt-2" id="btn-auto-assign">🎲 Auto-assign to 4 teams</button>
+      <div id="auto-assign-preview" class="mt-2"></div>
+
+      <hr class="mt-4" />
+      <input type="search" id="assign-team-search" placeholder="🔍 Search instructor name..." class="mt-4 mb-2" />
+      <div id="assign-team-list" style="max-height:340px; overflow-y:auto;"></div>
+    </div>
+
     <div class="card mb-4" id="dropped-names-section" style="display:none;">
       <h3>Names that couldn't be identified</h3>
       <p class="text-muted">These didn't contain a recognizable person's name (just labels/jargon like "SA Surgeon"), so nobody was assigned — no fake instructor was created. If one of these should map to a real person, add them to the master list with a clearer name and re-import.</p>
@@ -96,9 +113,11 @@
   <!-- Logic for this page: stats, filters, and export.
        Instructors -> app.js. Topics/filters/export -> dataEngine.js -->
   <script type="module">
-    import { getAllInstructors, onAuthChange, isCurrentUserAdmin } from "./app.js";
+    import { getAllInstructors, onAuthChange, isCurrentUserAdmin, TEAM_IDS } from "./app.js";
     import {
       getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible,
+      getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV, assignInstructorToTeam,
+      computeBalancedTeamAssignment, applyTeamAssignment,
     } from "./dataEngine.js";
     import { importNow } from "./importEngine.js";
 
@@ -130,6 +149,8 @@
         renderStats();
         renderInstructorProgress();
         renderCourseProgress();
+        renderTeamProgress();
+        renderAssignTeamList();
         populateFilterOptions();
         refreshPreview();
       } catch (err) {
@@ -230,6 +251,112 @@
         .join("");
     }
 
+    function renderTeamProgress() {
+      const rows = getTeamProgress(allInstructors, allTopics, TEAM_IDS);
+      $("team-progress").innerHTML = rows
+        .map(
+          (r) => `
+        <div class="flex-between mt-2" style="align-items:center; flex-wrap:wrap; gap:8px;">
+          <span style="min-width:70px; font-weight:600;">${r.teamId}</span>
+          <span class="flex gap-2" style="align-items:center; flex:1; min-width:200px;">
+            <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
+            <span class="text-muted" style="width:190px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.topicCount} topics · ${r.instructors.length} instructors</span>
+          </span>
+          <button class="btn btn-secondary export-team-btn" data-team="${r.teamId}" style="font-size:0.8rem; padding:6px 12px;">⬇ CSV</button>
+        </div>
+      `
+        )
+        .join("");
+
+      document.querySelectorAll(".export-team-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const teamId = btn.dataset.team;
+          const teamRow = rows.find((r) => r.teamId === teamId);
+          if (!teamRow || teamRow.instructors.length === 0) {
+            alert("No instructors assigned to this team yet.");
+            return;
+          }
+          const csvRows = buildTeamRosterRows(teamRow.instructors, allTopics);
+          downloadRowsAsCSV(csvRows, `${teamId.replace(/\s+/g, "-").toLowerCase()}-roster.csv`);
+        });
+      });
+    }
+
+    let assignTeamRows = [];
+
+    function renderAssignTeamList(filterTerm = "") {
+      assignTeamRows = allInstructors
+        .filter((i) => !filterTerm || i.name.toLowerCase().includes(filterTerm.toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      const teamOptions = ["", ...TEAM_IDS].map((t) => `<option value="${t}">${t || "Unassigned"}</option>`).join("");
+
+      $("assign-team-list").innerHTML = assignTeamRows
+        .map(
+          (i) => `
+        <div class="flex-between mt-2">
+          <span>${i.name}</span>
+          <select class="assign-team-select" data-id="${i.instructorId}" style="width:160px;">
+            ${teamOptions}
+          </select>
+        </div>
+      `
+        )
+        .join("");
+
+      document.querySelectorAll(".assign-team-select").forEach((sel) => {
+        const instr = allInstructors.find((i) => i.instructorId === sel.dataset.id);
+        sel.value = instr?.assignedTo || "";
+        sel.addEventListener("change", async () => {
+          await assignInstructorToTeam(sel.dataset.id, sel.value);
+          if (instr) instr.assignedTo = sel.value;
+          renderTeamProgress();
+        });
+      });
+    }
+
+    $("assign-team-search").addEventListener("input", (e) => renderAssignTeamList(e.target.value.trim()));
+
+    let pendingAssignment = null;
+
+    $("btn-auto-assign").addEventListener("click", () => {
+      const { assignment, teamSummary } = computeBalancedTeamAssignment(allInstructors, allTopics, TEAM_IDS);
+      pendingAssignment = assignment;
+
+      $("auto-assign-preview").innerHTML = `
+        <div class="mt-2" style="border:1px solid var(--color-border); border-radius:var(--radius-md); padding:var(--space-3);">
+          <p style="margin:0 0 8px; font-weight:600;">Preview (nothing saved yet):</p>
+          ${teamSummary
+            .map((t) => `<div>${t.teamId}: ${t.instructorCount} instructors, ${t.topicCount} topics</div>`)
+            .join("")}
+          <p class="text-muted mt-2" style="font-size:0.8rem;">This replaces the CURRENT team assignment for every instructor. Any manual changes you've made below will be overwritten.</p>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary" id="btn-confirm-auto-assign">Save this assignment</button>
+            <button class="btn btn-secondary" id="btn-cancel-auto-assign">Cancel</button>
+          </div>
+        </div>
+      `;
+
+      $("btn-cancel-auto-assign").addEventListener("click", () => {
+        pendingAssignment = null;
+        $("auto-assign-preview").innerHTML = "";
+      });
+
+      $("btn-confirm-auto-assign").addEventListener("click", async () => {
+        if (!pendingAssignment) return;
+        $("btn-confirm-auto-assign").disabled = true;
+        $("btn-confirm-auto-assign").textContent = "Saving...";
+        await applyTeamAssignment(pendingAssignment);
+        for (const instr of allInstructors) {
+          if (pendingAssignment.has(instr.instructorId)) instr.assignedTo = pendingAssignment.get(instr.instructorId);
+        }
+        pendingAssignment = null;
+        $("auto-assign-preview").innerHTML = `<p class="text-muted mt-2">✓ Saved.</p>`;
+        renderTeamProgress();
+        renderAssignTeamList();
+      });
+    });
+
     function renderDroppedNames(droppedRawTexts) {
       const section = $("dropped-names-section");
       if (!droppedRawTexts || droppedRawTexts.length === 0) {
@@ -289,6 +416,8 @@
       renderStats();
       renderInstructorProgress();
       renderCourseProgress();
+      renderTeamProgress();
+      renderAssignTeamList();
       populateFilterOptions();
       refreshPreview();
     });
