@@ -12,15 +12,21 @@ rules_version = '2';
 //   the code submitted against the real one internally
 //   (isAdmin() below) — the real code is never readable by any
 //   client, even a signed-in one.
+// - Support teams (Team A/B/C/D — a ROLE, not a specific person):
+//   each team has its own code, checked the same way as the admin
+//   code. Whoever is covering that role this week uses that team's
+//   code — swapping people never requires touching the system.
 //
 // - Anyone signed in can READ instructors / topics.
 // - Anyone signed in can UPDATE a topic (add/edit/delete outcomes) —
 //   that's normal instructor collaboration.
-// - Only an admin session can WRITE to instructors, or CREATE/DELETE
-//   topics — this protects bulk import/management in admin.html.
+// - Only an admin session can WRITE to instructors (including who's
+//   assigned to which team), or CREATE/DELETE topics — this protects
+//   bulk import/management in admin.html.
 //
 // To change the admin code, edit adminAccess/main directly in the
-// Firestore Data tab — no redeploy needed.
+// Firestore Data tab. To change a team's code, edit teamAccess/{Team A}
+// (etc.) the same way — no redeploy needed either way.
 // ---------------------------------------------------------------
 function isSignedIn() {
   return request.auth != null;
@@ -39,21 +45,42 @@ match /databases/{database}/documents {
   }
 
   match /adminAccess/{docId} {
-    allow read: if false;
-    allow write: if false;
+    allow read: if false;  // never readable by clients directly
+    allow write: if false; // edited only from the Firebase console
   }
 
   match /adminSessions/{uid} {
     allow read: if isSignedIn() && request.auth.uid == uid;
+    // Both the first time (create) AND re-entering the code later on
+    // the same device (update, since the doc already exists) require
+    // the code to match. Without covering update too, a second correct
+    // attempt on a device that already has a session would be wrongly
+    // rejected.
     allow create, update: if isSignedIn() && request.auth.uid == uid
       && request.resource.data.codeProvided ==
          get(/databases/$(database)/documents/adminAccess/main).data.code;
-    allow delete: if isSignedIn() && request.auth.uid == uid;
+    allow delete: if isSignedIn() && request.auth.uid == uid; // allows "log out of admin"
+  }
+
+  match /teamAccess/{teamId} {
+    allow read: if false;  // never readable by clients directly
+    allow write: if false; // edited only from the Firebase console
+  }
+
+  match /teamSessions/{uid} {
+    allow read: if isSignedIn() && request.auth.uid == uid;
+    // The client submits { teamId, codeProvided }. This only succeeds
+    // if codeProvided matches the REAL code stored for that specific
+    // teamId — the real code is never exposed to the client.
+    allow create, update: if isSignedIn() && request.auth.uid == uid
+      && request.resource.data.codeProvided ==
+         get(/databases/$(database)/documents/teamAccess/$(request.resource.data.teamId)).data.code;
+    allow delete: if isSignedIn() && request.auth.uid == uid; // allows "log out of team view"
   }
 
   match /topics/{topicId} {
     allow read: if isSignedIn();
-    allow create, delete: if isAdmin();
-    allow update: if isSignedIn();
+    allow create, delete: if isAdmin(); // bulk import / admin only
+    allow update: if isSignedIn();      // add/edit/delete outcomes
   }
 }
