@@ -99,6 +99,40 @@ export async function isCurrentUserAdmin() {
 }
 
 // ================================================================
+// SUPPORT TEAM ACCESS (Team A/B/C/D — a role, not a specific person)
+// ================================================================
+
+export const TEAM_IDS = ["Team A", "Team B", "Team C", "Team D"];
+
+/**
+ * Submits a team code for a specific teamId. Only succeeds if the
+ * code matches THAT team's real code (see firestore.rules) — never
+ * leaked to the client. Whoever is covering that role this week uses
+ * this team's code; swapping people never touches the system.
+ */
+export async function signInAsTeam(teamId, code) {
+  const user = await ensureSignedIn();
+  try {
+    await setDoc(doc(db, "teamSessions", user.uid), {
+      teamId,
+      codeProvided: code.trim(),
+      createdAt: serverTimestamp(),
+    });
+  } catch (err) {
+    throw new Error("Incorrect team code.");
+  }
+  window.sessionStorage.setItem("teamId", teamId);
+  return true;
+}
+
+export async function getCurrentTeam() {
+  const teamId = window.sessionStorage.getItem("teamId");
+  if (!teamId || !auth.currentUser) return null;
+  const snap = await getDoc(doc(db, "teamSessions", auth.currentUser.uid));
+  return snap.exists() && snap.data().teamId === teamId ? teamId : null;
+}
+
+// ================================================================
 // SESSION
 // ================================================================
 
@@ -110,8 +144,10 @@ export async function logOut() {
   const uid = auth.currentUser?.uid;
   window.sessionStorage.removeItem("guestInstructorId");
   window.sessionStorage.removeItem("isAdmin");
+  window.sessionStorage.removeItem("teamId");
   if (uid) {
     try { await deleteDoc(doc(db, "adminSessions", uid)); } catch (e) { /* noop */ }
+    try { await deleteDoc(doc(db, "teamSessions", uid)); } catch (e) { /* noop */ }
   }
   await signOut(auth);
 }
