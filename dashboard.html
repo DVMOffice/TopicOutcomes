@@ -8,7 +8,7 @@
 </head>
 <body>
   <div class="topbar">
-    <h1>UCVM Learning Outcomes</h1>
+    <h1 id="home-link" style="cursor:pointer;" title="Back to home">UCVM Learning Outcomes</h1>
     <div class="flex gap-4">
       <span id="welcome-msg"></span>
       <button class="btn btn-secondary" id="btn-logout">Log out</button>
@@ -41,6 +41,11 @@
     const $ = (id) => document.getElementById(id);
 
     $("btn-logout").addEventListener("click", async () => {
+      await logOut();
+      window.location.href = "index.html";
+    });
+
+    $("home-link").addEventListener("click", async () => {
       await logOut();
       window.location.href = "index.html";
     });
