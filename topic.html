@@ -9,7 +9,7 @@
 <body>
   <div id="save-toast" style="display:none; position:fixed; bottom:24px; right:24px; background:var(--color-success); color:#fff; padding:10px 18px; border-radius:var(--radius-md); box-shadow:var(--shadow-card-hover); font-weight:600; z-index:1000;">✓ Saved</div>
   <div class="topbar">
-    <h1>UCVM Learning Outcomes</h1>
+    <h1 id="home-link" style="cursor:pointer;" title="Back to home">UCVM Learning Outcomes</h1>
     <a href="dashboard.html" style="color:#fff;">← Back to my dashboard</a>
   </div>
 
@@ -70,7 +70,7 @@
   <!-- Logic for this page: real-time shared outcomes.
        Identity -> app.js. Everything about outcomes/activity -> dataEngine.js -->
   <script type="module">
-    import { onAuthChange, getCurrentInstructor, getAllInstructors } from "./app.js";
+    import { onAuthChange, getCurrentInstructor, getAllInstructors, logOut } from "./app.js";
     import { listenToTopic, addOutcomesBulk, updateOutcome, deleteOutcome, getTopicsForInstructor } from "./dataEngine.js";
 
     const SPECIES_LIST = [
@@ -89,6 +89,11 @@
     const ICON_DELETE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
 
     const $ = (id) => document.getElementById(id);
+
+    $("home-link").addEventListener("click", async () => {
+      await logOut();
+      window.location.href = "index.html";
+    });
 
     function optionsHtml(list, selected, placeholder) {
       const opts = [`<option value="" ${!selected ? "selected" : ""}>${placeholder}</option>`];
