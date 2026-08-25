@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>UCVM Learning Outcomes — Team Dashboard</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <h1 id="team-title">UCVM Learning Outcomes</h1>
+    <button class="btn btn-secondary" id="btn-logout">Log out</button>
+  </div>
+
+  <div class="main-content">
+    <div class="card mb-4">
+      <h2 class="section-heading"><span class="icon">📈</span> Overall progress</h2>
+      <div class="progress-track mt-2"><div class="progress-fill" id="overall-fill" style="width:0%"></div></div>
+      <p class="text-muted mt-2" id="overall-summary"></p>
+    </div>
+
+    <div class="card mb-4">
+      <h3 class="section-heading"><span class="icon">🎯</span> Weekly goal</h3>
+      <div class="table-scroll">
+        <table class="outcomes-table" id="goal-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Target</th>
+              <th>Target topics</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="goal-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between" style="align-items:center; flex-wrap:wrap; gap:10px;">
+        <h3 class="section-heading" style="margin:0;"><span class="icon">👥</span> My instructors</h3>
+        <button class="btn btn-secondary" id="btn-export-roster">⬇ Download my list (CSV)</button>
+      </div>
+      <div id="roster-list" class="mt-4"></div>
+    </div>
+  </div>
+
+  <!-- Logic for this page: read-only progress view for a support team.
+       Identity -> app.js. Data -> dataEngine.js -->
+  <script type="module">
+    import { onAuthChange, logOut, getCurrentTeam } from "./app.js";
+    import { getAllInstructors, getAllTopics, getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV } from "./dataEngine.js";
+
+    const $ = (id) => document.getElementById(id);
+
+    // The weekly goal plan — edit these five milestones if the plan changes.
+    const GOALS = [
+      { date: "2026-09-04", label: "Sep 4", pct: 5 },
+      { date: "2026-09-11", label: "Sep 11", pct: 35 },
+      { date: "2026-09-18", label: "Sep 18", pct: 70 },
+      { date: "2026-09-25", label: "Sep 25", pct: 95 },
+      { date: "2026-10-02", label: "Oct 2", pct: 100 },
+    ];
+
+    $("btn-logout").addEventListener("click", async () => {
+      await logOut();
+      window.location.href = "index.html";
+    });
+
+    function renderGoalTable(totalTopics, completeTopics) {
+      const today = new Date();
+      const actualPct = totalTopics === 0 ? 0 : Math.round((completeTopics / totalTopics) * 100);
+
+      $("goal-tbody").innerHTML = GOALS.map((g) => {
+        const targetTopics = Math.ceil((g.pct / 100) * totalTopics);
+        const hasPassed = today >= new Date(g.date + "T23:59:59");
+        let statusHtml = `<span class="text-muted">Upcoming</span>`;
+        if (hasPassed) {
+          statusHtml = actualPct >= g.pct
+            ? `<span class="badge badge-complete">On track</span>`
+            : `<span class="badge" style="background:#fee2e2; color:#991b1b;">Behind</span>`;
+        }
+        return `
+          <tr>
+            <td>${g.label}</td>
+            <td>${g.pct}%</td>
+            <td>${targetTopics} topics</td>
+            <td>${statusHtml}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderRoster(members, allTopics) {
+      if (members.length === 0) {
+        $("roster-list").innerHTML = `<p class="text-muted">No instructors assigned to your team yet.</p>`;
+        return;
+      }
+      const rows = members
+        .map((instr) => {
+          const assigned = allTopics.filter((t) => (t.assignedInstructorIDs || []).includes(instr.instructorId));
+          const complete = assigned.filter((t) => t.completionStatus === "complete").length;
+          const pct = assigned.length === 0 ? 0 : Math.round((complete / assigned.length) * 100);
+          return { name: instr.name, email: instr.email, complete, total: assigned.length, pct };
+        })
+        .sort((a, b) => a.pct - b.pct); // least progress first, so it's obvious who to follow up with
+
+      $("roster-list").innerHTML = rows
+        .map(
+          (r) => `
+        <div class="flex-between mt-2">
+          <div>
+            <div>${r.name}</div>
+            <div class="text-muted" style="font-size:0.8rem;">${r.email || "No email on file"}</div>
+          </div>
+          <span class="flex gap-2" style="align-items:center; width:220px;">
+            <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
+            <span class="text-muted" style="width:110px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} (${r.pct}%)</span>
+          </span>
+        </div>
+      `
+        )
+        .join("");
+    }
+
+    let currentMembers = [];
+    let currentTopics = [];
+
+    $("btn-export-roster").addEventListener("click", () => {
+      const rows = buildTeamRosterRows(currentMembers, currentTopics);
+      downloadRowsAsCSV(rows, "my-instructors.csv");
+    });
+
+    onAuthChange(async (user) => {
+      if (!user) { window.location.href = "index.html"; return; }
+      const teamId = await getCurrentTeam();
+      if (!teamId) { window.location.href = "index.html"; return; }
+
+      $("team-title").textContent = `${teamId} Dashboard`;
+
+      const allInstructors = await getAllInstructors();
+      const allTopics = await getAllTopics();
+      const [progress] = getTeamProgress(allInstructors, allTopics, [teamId]);
+
+      currentMembers = progress.instructors;
+      currentTopics = allTopics;
+
+      $("overall-fill").style.width = `${progress.pct}%`;
+      $("overall-summary").textContent =
+        `${progress.pct}% complete — ${progress.complete} of ${progress.topicCount} topics, ${progress.outcomeCount} outcomes written across ${progress.instructors.length} instructors`;
+
+      renderGoalTable(progress.topicCount, progress.complete);
+      renderRoster(progress.instructors, allTopics);
+    });
+  </script>
+</body>
+</html>
