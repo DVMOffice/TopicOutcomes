@@ -3,119 +3,252 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>UCVM Learning Outcomes — Team Dashboard</title>
+<title>UCVM Learning Outcomes — Admin</title>
 <link rel="stylesheet" href="style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
   <div class="topbar">
-    <h1 id="team-title">UCVM Learning Outcomes</h1>
-    <button class="btn btn-secondary" id="btn-logout">Log out</button>
+    <h1 id="home-link" style="cursor:pointer;" title="Back to home">UCVM Learning Outcomes — Admin</h1>
+    <a href="dashboard.html" style="color:#fff;">Instructor view</a>
   </div>
 
   <div class="main-content">
+    <div class="card mb-4" id="import-section">
+      <h3 class="section-heading"><span class="icon">📥</span> Import data from Excel</h3>
+      <p class="text-muted">Upload the two original files and import right away. Names that match confidently link automatically; anything ambiguous imports as a placeholder you can fix later, one topic at a time, in "Review topics" below — nothing blocks the import.</p>
+      <div class="form-group mt-2">
+        <label for="file-master">Master list (Topicinstructor_master_list.xlsx)</label>
+        <input type="file" id="file-master" accept=".xlsx" />
+      </div>
+      <div class="form-group">
+        <label for="file-emails">Email list (Instructorsemails_list.xlsx)</label>
+        <input type="file" id="file-emails" accept=".xlsx" />
+      </div>
+      <button class="btn btn-primary" id="btn-import">Import and upload to Firestore</button>
+      <p class="text-muted mt-2" id="import-status"></p>
+    </div>
+
     <div class="card mb-4">
-      <h2 class="section-heading"><span class="icon">📈</span> Overall progress</h2>
-      <div class="progress-track mt-2"><div class="progress-fill" id="overall-fill" style="width:0%"></div></div>
+      <h2 id="overall-title">Overall progress</h2>
+      <div class="progress-track"><div class="progress-fill" id="overall-fill" style="width:0%"></div></div>
       <p class="text-muted mt-2" id="overall-summary"></p>
     </div>
 
-    <div class="card mb-4">
-      <h3 class="section-heading"><span class="icon">🎯</span> Weekly goal</h3>
-      <div class="table-scroll">
-        <table class="outcomes-table" id="goal-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Target</th>
-              <th>Target topics</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="goal-tbody"></tbody>
-        </table>
+    <div class="card-grid mb-4">
+      <div class="card"><h3 id="stat-total">0</h3><span class="text-muted">Total topics</span></div>
+      <div class="card"><h3 id="stat-complete">0</h3><span class="text-muted">Completed topics</span></div>
+      <div class="card"><h3 id="stat-progress">0</h3><span class="text-muted">In progress</span></div>
+      <div class="card"><h3 id="stat-missing">0</h3><span class="text-muted">Not started</span></div>
+      <div class="card"><h3 id="stat-instructors">0</h3><span class="text-muted">Total instructors</span></div>
+      <div class="card"><h3 id="stat-outcomes">0</h3><span class="text-muted">Total outcomes written</span></div>
+    </div>
+
+    <div class="two-col-grid mb-4">
+      <div class="card">
+        <h3 class="section-heading"><span class="icon">📊</span> Progress by instructor</h3>
+        <input type="search" id="instructor-progress-search" placeholder="🔍 Search instructor name..." class="mt-2 mb-2" />
+        <div id="instructor-progress" style="max-height:340px; overflow-y:auto;"></div>
       </div>
+
+      <div class="card">
+        <h3 class="section-heading"><span class="icon">🏫</span> Progress by course</h3>
+        <p class="text-muted mt-1" style="font-size:0.85rem;">For your weekly report — how many topics and outcomes exist per course.</p>
+        <div id="course-progress" class="mt-2" style="max-height:340px; overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <h3 class="section-heading"><span class="icon">🧑‍🤝‍🧑</span> Progress by team</h3>
+      <p class="text-muted mt-1" style="font-size:0.85rem;">Team A/B/C/D are roles, not specific people — swap who's covering a team anytime without touching this.</p>
+      <div id="team-progress" class="mt-2"></div>
+    </div>
+
+    <div class="card mb-4">
+      <h3 class="section-heading"><span class="icon">🏷️</span> Assign instructors to a team</h3>
+      <p class="text-muted mt-1" style="font-size:0.85rem;">Auto-assign balances the 4 teams by topic count using your live data right now — busiest instructors get spread out first. You'll see the result before anything is saved.</p>
+      <button class="btn btn-primary mt-2" id="btn-auto-assign">🎲 Auto-assign to 4 teams</button>
+      <div id="auto-assign-preview" class="mt-2"></div>
+
+      <hr class="mt-4" />
+      <input type="search" id="assign-team-search" placeholder="🔍 Search instructor name..." class="mt-4 mb-2" />
+      <div id="assign-team-list" style="max-height:340px; overflow-y:auto;"></div>
+    </div>
+
+    <div class="card mb-4" id="dropped-names-section" style="display:none;">
+      <h3>Names that couldn't be identified</h3>
+      <p class="text-muted">These didn't contain a recognizable person's name (just labels/jargon like "SA Surgeon"), so nobody was assigned — no fake instructor was created. If one of these should map to a real person, add them to the master list with a clearer name and re-import.</p>
+      <ul id="dropped-names-list" style="margin:8px 0 0 18px; padding:0;"></ul>
+    </div>
+
+    <div class="card mb-4">
+      <h3 class="section-heading"><span class="icon">🔍</span> Export filters</h3>
+      <div class="filters-bar">
+        <select id="filter-year"><option value="">All years</option></select>
+        <select id="filter-course"><option value="">All courses</option></select>
+        <select id="filter-instructor"><option value="">All instructors</option></select>
+        <select id="filter-status">
+          <option value="">All statuses</option>
+          <option value="not_started">Not started</option>
+          <option value="in_progress">In progress</option>
+          <option value="complete">Complete</option>
+        </select>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-primary" id="btn-export-csv">⬇ Export CSV</button>
+        <button class="btn btn-secondary" id="btn-export-excel">⬇ Excel</button>
+        <button class="btn btn-secondary" id="btn-export-json">⬇ JSON</button>
+      </div>
+      <p class="text-muted mt-2" id="export-row-count"></p>
     </div>
 
     <div class="card">
-      <div class="flex-between" style="align-items:center; flex-wrap:wrap; gap:10px;">
-        <h3 class="section-heading" style="margin:0;"><span class="icon">👥</span> My instructors</h3>
-        <button class="btn btn-secondary" id="btn-export-roster">⬇ Download my list (CSV)</button>
+      <h3>Preview (first 20 rows)</h3>
+      <div style="overflow-x:auto;">
+        <table class="data-table" id="preview-table"></table>
       </div>
-      <div id="roster-list" class="mt-4"></div>
     </div>
   </div>
 
-  <!-- Logic for this page: read-only progress view for a support team.
-       Identity -> app.js. Data -> dataEngine.js -->
+  <!-- Logic for this page: stats, filters, and export.
+       Instructors -> app.js. Topics/filters/export -> dataEngine.js -->
   <script type="module">
-    import { onAuthChange, logOut, getCurrentTeam } from "./app.js";
-    import { getAllInstructors, getAllTopics, getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV } from "./dataEngine.js";
+    import { getAllInstructors, onAuthChange, isCurrentUserAdmin, TEAM_IDS, logOut } from "./app.js";
+    import {
+      getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible,
+      getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV, assignInstructorToTeam,
+      computeBalancedTeamAssignment, applyTeamAssignment,
+    } from "./dataEngine.js";
+    import { importNow } from "./importEngine.js";
 
     const $ = (id) => document.getElementById(id);
 
-    // The weekly goal plan — edit these five milestones if the plan changes.
-    const GOALS = [
-      { date: "2026-09-04", label: "Sep 4", pct: 5 },
-      { date: "2026-09-11", label: "Sep 11", pct: 35 },
-      { date: "2026-09-18", label: "Sep 18", pct: 70 },
-      { date: "2026-09-25", label: "Sep 25", pct: 95 },
-      { date: "2026-10-02", label: "Oct 2", pct: 100 },
-    ];
-
-    $("btn-logout").addEventListener("click", async () => {
+    $("home-link").addEventListener("click", async () => {
       await logOut();
       window.location.href = "index.html";
     });
+    let allTopics = [];
+    let allInstructors = [];
 
-    function renderGoalTable(totalTopics, completeTopics) {
-      const today = new Date();
-      const actualPct = totalTopics === 0 ? 0 : Math.round((completeTopics / totalTopics) * 100);
-
-      $("goal-tbody").innerHTML = GOALS.map((g) => {
-        const targetTopics = Math.ceil((g.pct / 100) * totalTopics);
-        const hasPassed = today >= new Date(g.date + "T23:59:59");
-        let statusHtml = `<span class="text-muted">Upcoming</span>`;
-        if (hasPassed) {
-          statusHtml = actualPct >= g.pct
-            ? `<span class="badge badge-complete">On track</span>`
-            : `<span class="badge" style="background:#fee2e2; color:#991b1b;">Behind</span>`;
-        }
-        return `
-          <tr>
-            <td>${g.label}</td>
-            <td>${g.pct}%</td>
-            <td>${targetTopics} topics</td>
-            <td>${statusHtml}</td>
-          </tr>
-        `;
-      }).join("");
-    }
-
-    function renderRoster(members, allTopics) {
-      if (members.length === 0) {
-        $("roster-list").innerHTML = `<p class="text-muted">No instructors assigned to your team yet.</p>`;
+    $("btn-import").addEventListener("click", async () => {
+      const masterFile = $("file-master").files[0];
+      const emailsFile = $("file-emails").files[0];
+      if (!masterFile || !emailsFile) {
+        $("import-status").textContent = "Select both files first.";
         return;
       }
-      const rows = members
+      $("btn-import").disabled = true;
+      try {
+        const result = await importNow(masterFile, emailsFile, (msg) => {
+          $("import-status").textContent = msg;
+        });
+        $("import-status").textContent =
+          `Done: ${result.totalInstructors} instructors (${result.instructorsWithoutEmail} without email), ` +
+          `${result.totalTopics} topics imported, ${result.excludedRows} rows excluded (labs/exams/etc.), ` +
+          `${result.newInstructorsWithoutEmail} new instructor(s) added without an email on file (searchable by name; add their email to the spreadsheet and re-import to link it).`;
+        renderDroppedNames(result.droppedRawTexts);
+
+        // Refresh the dashboard with the newly uploaded data
+        allTopics = await getAllTopics();
+        allInstructors = await getAllInstructors();
+        renderStats();
+        renderInstructorProgress();
+        renderCourseProgress();
+        renderTeamProgress();
+        renderAssignTeamList();
+        populateFilterOptions();
+        refreshPreview();
+      } catch (err) {
+        $("import-status").textContent = "Error: " + err.message;
+      } finally {
+        $("btn-import").disabled = false;
+      }
+    });
+
+    function renderStats() {
+      const total = allTopics.length;
+      const complete = allTopics.filter((t) => t.completionStatus === "complete").length;
+      const inProgress = allTopics.filter((t) => t.completionStatus === "in_progress").length;
+      const missing = allTopics.filter((t) => t.completionStatus === "not_started").length;
+      const totalOutcomes = allTopics.reduce((sum, t) => sum + (t.outcomes || []).length, 0);
+      const pct = total === 0 ? 0 : Math.round((complete / total) * 100);
+
+      $("overall-fill").style.width = `${pct}%`;
+      $("overall-summary").textContent = `${pct}% complete`;
+      $("stat-total").textContent = total;
+      $("stat-complete").textContent = complete;
+      $("stat-progress").textContent = inProgress;
+      $("stat-missing").textContent = missing;
+      $("stat-instructors").textContent = allInstructors.length;
+      $("stat-outcomes").textContent = totalOutcomes;
+    }
+
+    let instructorProgressRows = [];
+
+    function renderInstructorProgress() {
+      instructorProgressRows = allInstructors
         .map((instr) => {
           const assigned = allTopics.filter((t) => (t.assignedInstructorIDs || []).includes(instr.instructorId));
           const complete = assigned.filter((t) => t.completionStatus === "complete").length;
+          const outcomeCount = assigned.reduce((sum, t) => sum + (t.outcomes || []).length, 0);
           const pct = assigned.length === 0 ? 0 : Math.round((complete / assigned.length) * 100);
-          return { name: instr.name, email: instr.email, complete, total: assigned.length, pct };
+          return { name: instr.name, pct, total: assigned.length, complete, outcomeCount };
         })
-        .sort((a, b) => a.pct - b.pct); // least progress first, so it's obvious who to follow up with
+        .filter((r) => r.total > 0)
+        .sort((a, b) => b.pct - a.pct);
 
-      $("roster-list").innerHTML = rows
+      renderInstructorProgressList(instructorProgressRows);
+    }
+
+    function renderInstructorProgressList(rows) {
+      $("instructor-progress").innerHTML = rows.length
+        ? rows
+            .map(
+              (r) => `
+        <div class="flex-between mt-2">
+          <span>${r.name}</span>
+          <span class="flex gap-2" style="align-items:center; width:280px;">
+            <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
+            <span class="text-muted" style="width:170px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} topics · ${r.outcomeCount} outcomes</span>
+          </span>
+        </div>
+      `
+            )
+            .join("")
+        : `<p class="text-muted mt-2">No instructors match that search.</p>`;
+    }
+
+    $("instructor-progress-search").addEventListener("input", (e) => {
+      const term = e.target.value.trim().toLowerCase();
+      const filtered = term ? instructorProgressRows.filter((r) => r.name.toLowerCase().includes(term)) : instructorProgressRows;
+      renderInstructorProgressList(filtered);
+    });
+
+    function renderCourseProgress() {
+      const byCourse = new Map(); // "Year 1 · Course 206" -> topics[]
+      for (const t of allTopics) {
+        const key = `${t.academicYear} · Course ${t.course}`;
+        if (!byCourse.has(key)) byCourse.set(key, []);
+        byCourse.get(key).push(t);
+      }
+
+      const rows = Array.from(byCourse.entries())
+        .map(([label, topics]) => {
+          const complete = topics.filter((t) => t.completionStatus === "complete").length;
+          const outcomeCount = topics.reduce((sum, t) => sum + (t.outcomes || []).length, 0);
+          const pct = topics.length === 0 ? 0 : Math.round((complete / topics.length) * 100);
+          return { label, complete, total: topics.length, pct, outcomeCount };
+        })
+        .sort((a, b) => a.label.localeCompare(b.label));
+
+      $("course-progress").innerHTML = rows
         .map(
           (r) => `
         <div class="flex-between mt-2">
-          <div>
-            <div>${r.name}</div>
-            <div class="text-muted" style="font-size:0.8rem;">${r.email || "No email on file"}</div>
-          </div>
-          <span class="flex gap-2" style="align-items:center; width:220px;">
+          <span>${r.label}</span>
+          <span class="flex gap-2" style="align-items:center; width:280px;">
             <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
-            <span class="text-muted" style="width:110px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} (${r.pct}%)</span>
+            <span class="text-muted" style="width:170px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} topics · ${r.outcomeCount} outcomes</span>
           </span>
         </div>
       `
@@ -123,34 +256,175 @@
         .join("");
     }
 
-    let currentMembers = [];
-    let currentTopics = [];
+    function renderTeamProgress() {
+      const rows = getTeamProgress(allInstructors, allTopics, TEAM_IDS);
+      $("team-progress").innerHTML = rows
+        .map(
+          (r) => `
+        <div class="flex-between mt-2" style="align-items:center; flex-wrap:wrap; gap:8px;">
+          <span style="min-width:70px; font-weight:600;">${r.teamId}</span>
+          <span class="flex gap-2" style="align-items:center; flex:1; min-width:200px;">
+            <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
+            <span class="text-muted" style="width:190px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.topicCount} topics · ${r.instructors.length} instructors</span>
+          </span>
+          <button class="btn btn-secondary export-team-btn" data-team="${r.teamId}" style="font-size:0.8rem; padding:6px 12px;">⬇ CSV</button>
+        </div>
+      `
+        )
+        .join("");
 
-    $("btn-export-roster").addEventListener("click", () => {
-      const rows = buildTeamRosterRows(currentMembers, currentTopics);
-      downloadRowsAsCSV(rows, "my-instructors.csv");
+      document.querySelectorAll(".export-team-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const teamId = btn.dataset.team;
+          const teamRow = rows.find((r) => r.teamId === teamId);
+          if (!teamRow || teamRow.instructors.length === 0) {
+            alert("No instructors assigned to this team yet.");
+            return;
+          }
+          const csvRows = buildTeamRosterRows(teamRow.instructors, allTopics);
+          downloadRowsAsCSV(csvRows, `${teamId.replace(/\s+/g, "-").toLowerCase()}-roster.csv`);
+        });
+      });
+    }
+
+    let assignTeamRows = [];
+
+    function renderAssignTeamList(filterTerm = "") {
+      assignTeamRows = allInstructors
+        .filter((i) => !filterTerm || i.name.toLowerCase().includes(filterTerm.toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      const teamOptions = ["", ...TEAM_IDS].map((t) => `<option value="${t}">${t || "Unassigned"}</option>`).join("");
+
+      $("assign-team-list").innerHTML = assignTeamRows
+        .map(
+          (i) => `
+        <div class="flex-between mt-2">
+          <span>${i.name}</span>
+          <select class="assign-team-select" data-id="${i.instructorId}" style="width:160px;">
+            ${teamOptions}
+          </select>
+        </div>
+      `
+        )
+        .join("");
+
+      document.querySelectorAll(".assign-team-select").forEach((sel) => {
+        const instr = allInstructors.find((i) => i.instructorId === sel.dataset.id);
+        sel.value = instr?.assignedTo || "";
+        sel.addEventListener("change", async () => {
+          await assignInstructorToTeam(sel.dataset.id, sel.value);
+          if (instr) instr.assignedTo = sel.value;
+          renderTeamProgress();
+        });
+      });
+    }
+
+    $("assign-team-search").addEventListener("input", (e) => renderAssignTeamList(e.target.value.trim()));
+
+    let pendingAssignment = null;
+
+    $("btn-auto-assign").addEventListener("click", () => {
+      const { assignment, teamSummary } = computeBalancedTeamAssignment(allInstructors, allTopics, TEAM_IDS);
+      pendingAssignment = assignment;
+
+      $("auto-assign-preview").innerHTML = `
+        <div class="mt-2" style="border:1px solid var(--color-border); border-radius:var(--radius-md); padding:var(--space-3);">
+          <p style="margin:0 0 8px; font-weight:600;">Preview (nothing saved yet):</p>
+          ${teamSummary
+            .map((t) => `<div>${t.teamId}: ${t.instructorCount} instructors, ${t.topicCount} topics</div>`)
+            .join("")}
+          <p class="text-muted mt-2" style="font-size:0.8rem;">This replaces the CURRENT team assignment for every instructor. Any manual changes you've made below will be overwritten.</p>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary" id="btn-confirm-auto-assign">Save this assignment</button>
+            <button class="btn btn-secondary" id="btn-cancel-auto-assign">Cancel</button>
+          </div>
+        </div>
+      `;
+
+      $("btn-cancel-auto-assign").addEventListener("click", () => {
+        pendingAssignment = null;
+        $("auto-assign-preview").innerHTML = "";
+      });
+
+      $("btn-confirm-auto-assign").addEventListener("click", async () => {
+        if (!pendingAssignment) return;
+        $("btn-confirm-auto-assign").disabled = true;
+        $("btn-confirm-auto-assign").textContent = "Saving...";
+        await applyTeamAssignment(pendingAssignment);
+        for (const instr of allInstructors) {
+          if (pendingAssignment.has(instr.instructorId)) instr.assignedTo = pendingAssignment.get(instr.instructorId);
+        }
+        pendingAssignment = null;
+        $("auto-assign-preview").innerHTML = `<p class="text-muted mt-2">✓ Saved.</p>`;
+        renderTeamProgress();
+        renderAssignTeamList();
+      });
     });
 
+    function renderDroppedNames(droppedRawTexts) {
+      const section = $("dropped-names-section");
+      if (!droppedRawTexts || droppedRawTexts.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+      section.style.display = "block";
+      $("dropped-names-list").innerHTML = droppedRawTexts.map((t) => `<li>"${t}"</li>`).join("");
+    }
+
+    function populateFilterOptions() {
+      const years = [...new Set(allTopics.map((t) => t.academicYear))].sort();
+      const courses = [...new Set(allTopics.map((t) => t.course))].sort();
+      $("filter-year").innerHTML = `<option value="">All years</option>` + years.map((y) => `<option value="${y}">${y}</option>`).join("");
+      $("filter-course").innerHTML = `<option value="">All courses</option>` + courses.map((c) => `<option value="${c}">${c}</option>`).join("");
+      $("filter-instructor").innerHTML = `<option value="">All instructors</option>` + allInstructors.map((i) => `<option value="${i.instructorId}">${i.name}</option>`).join("");
+    }
+
+    function currentFilters() {
+      return {
+        academicYear: $("filter-year").value,
+        course: $("filter-course").value,
+        instructorId: $("filter-instructor").value,
+        completionStatus: $("filter-status").value,
+      };
+    }
+
+    function renderPreview(rows) {
+      $("export-row-count").textContent = `${rows.length} rows ready to export (Power Query format, one row per outcome).`;
+      const table = $("preview-table");
+      if (rows.length === 0) { table.innerHTML = "<tr><td>No data matches these filters.</td></tr>"; return; }
+      const cols = Object.keys(rows[0]);
+      table.innerHTML = `<tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr>` + rows.slice(0, 20).map((r) => `<tr>${cols.map((c) => `<td>${r[c]}</td>`).join("")}</tr>`).join("");
+    }
+
+    function refreshPreview() {
+      renderPreview(flattenToRows(applyFilters(allTopics, currentFilters())));
+    }
+
+    ["filter-year", "filter-course", "filter-instructor", "filter-status"].forEach((id) => $(id).addEventListener("change", refreshPreview));
+
+    $("btn-export-csv").addEventListener("click", () => downloadCSV(flattenToRows(applyFilters(allTopics, currentFilters()))));
+    $("btn-export-excel").addEventListener("click", () => downloadExcelCompatible(flattenToRows(applyFilters(allTopics, currentFilters()))));
+    $("btn-export-json").addEventListener("click", () => downloadJSON(flattenToRows(applyFilters(allTopics, currentFilters()))));
+
     onAuthChange(async (user) => {
-      if (!user) { window.location.href = "index.html"; return; }
-      const teamId = await getCurrentTeam();
-      if (!teamId) { window.location.href = "index.html"; return; }
+      if (!user) {
+        window.location.href = "index.html";
+        return;
+      }
 
-      $("team-title").textContent = `${teamId} Dashboard`;
+      const isAdmin = await isCurrentUserAdmin();
+      $("import-section").style.display = isAdmin ? "block" : "none";
 
-      const allInstructors = await getAllInstructors();
-      const allTopics = await getAllTopics();
-      const [progress] = getTeamProgress(allInstructors, allTopics, [teamId]);
-
-      currentMembers = progress.instructors;
-      currentTopics = allTopics;
-
-      $("overall-fill").style.width = `${progress.pct}%`;
-      $("overall-summary").textContent =
-        `${progress.pct}% complete — ${progress.complete} of ${progress.topicCount} topics, ${progress.outcomeCount} outcomes written across ${progress.instructors.length} instructors`;
-
-      renderGoalTable(progress.topicCount, progress.complete);
-      renderRoster(progress.instructors, allTopics);
+      allTopics = await getAllTopics();
+      allInstructors = await getAllInstructors();
+      renderStats();
+      renderInstructorProgress();
+      renderCourseProgress();
+      renderTeamProgress();
+      renderAssignTeamList();
+      populateFilterOptions();
+      refreshPreview();
     });
   </script>
 </body>
