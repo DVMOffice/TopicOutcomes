@@ -24,6 +24,7 @@ import {
   runTransaction,
   writeBatch,
   deleteDoc,
+  updateDoc,
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -298,6 +299,16 @@ function downloadBlob(content, filename, mime) {
 export function downloadCSV(rows, filename = "learning-outcomes.csv") {
   downloadBlob(toCSV(rows), filename, "text/csv;charset=utf-8;");
 }
+
+/** Generic CSV export for simple row objects (columns inferred from keys) — used for team rosters, etc. */
+export function downloadRowsAsCSV(rows, filename = "export.csv") {
+  if (!rows || rows.length === 0) return;
+  const cols = Object.keys(rows[0]);
+  const header = cols.join(",");
+  const body = rows.map((r) => cols.map((c) => csvEscape(r[c])).join(",")).join("\n");
+  downloadBlob(`${header}\n${body}`, filename, "text/csv;charset=utf-8;");
+}
+
 export function downloadJSON(rows, filename = "learning-outcomes.json") {
   downloadBlob(JSON.stringify(rows, null, 2), filename, "application/json;charset=utf-8;");
 }
@@ -445,4 +456,85 @@ export async function mergeInstructorEverywhere(oldInstructorId, newInstructorId
   await deleteDoc(doc(db, "instructors", oldInstructorId));
 
   return { topicsUpdated: docs.length };
+}
+
+// ================================================================
+// SUPPORT TEAMS (Team A/B/C/D — role-based, not tied to a person)
+// ================================================================
+
+/** Sets (or clears, with teamId = "") which team an instructor is assigned to. */
+export async function assignInstructorToTeam(instructorId, teamId) {
+  await updateDoc(doc(db, "instructors", instructorId), { assignedTo: teamId || "" });
+}
+
+/** Groups instructors by their assignedTo team, with topic/outcome stats per team. */
+export function getTeamProgress(allInstructors, allTopics, teamIds) {
+  return teamIds.map((teamId) => {
+    const members = allInstructors.filter((i) => i.assignedTo === teamId);
+    const memberIds = new Set(members.map((i) => i.instructorId));
+    const topics = allTopics.filter((t) => (t.assignedInstructorIDs || []).some((id) => memberIds.has(id)));
+    const complete = topics.filter((t) => t.completionStatus === "complete").length;
+    const outcomeCount = topics.reduce((sum, t) => sum + (t.outcomes || []).length, 0);
+    const pct = topics.length === 0 ? 0 : Math.round((complete / topics.length) * 100);
+    return { teamId, instructors: members, topicCount: topics.length, complete, outcomeCount, pct };
+  });
+}
+
+/** Flat rows (name, email, topic count, % complete) for exporting one team's roster. */
+export function buildTeamRosterRows(members, allTopics) {
+  return members.map((instr) => {
+    const assigned = allTopics.filter((t) => (t.assignedInstructorIDs || []).includes(instr.instructorId));
+    const complete = assigned.filter((t) => t.completionStatus === "complete").length;
+    const pct = assigned.length === 0 ? 0 : Math.round((complete / assigned.length) * 100);
+    return {
+      "Instructor Name": instr.name,
+      Email: instr.email || "",
+      "Total Topics": assigned.length,
+      "Completed Topics": complete,
+      "Percent Complete": `${pct}%`,
+    };
+  });
+}
+
+/**
+ * Computes a balanced team assignment (does NOT write anything yet):
+ * sorts instructors by how many topics they have (busiest first), then
+ * greedily hands each one to whichever team currently has the fewest
+ * topics — the same approach used to keep the 4 teams' workload even.
+ * Returns a Map<instructorId, teamId>.
+ */
+export function computeBalancedTeamAssignment(allInstructors, allTopics, teamIds) {
+  const topicCountByInstructor = new Map();
+  for (const instr of allInstructors) {
+    const count = allTopics.filter((t) => (t.assignedInstructorIDs || []).includes(instr.instructorId)).length;
+    topicCountByInstructor.set(instr.instructorId, count);
+  }
+
+  const sorted = [...allInstructors].sort(
+    (a, b) => topicCountByInstructor.get(b.instructorId) - topicCountByInstructor.get(a.instructorId)
+  );
+
+  const teams = teamIds.map((id) => ({ id, topicCount: 0, instructorIds: [] }));
+  for (const instr of sorted) {
+    const target = teams.reduce((min, t) => (t.topicCount < min.topicCount ? t : min), teams[0]);
+    target.topicCount += topicCountByInstructor.get(instr.instructorId) || 0;
+    target.instructorIds.push(instr.instructorId);
+  }
+
+  const assignment = new Map();
+  for (const t of teams) for (const id of t.instructorIds) assignment.set(id, t.id);
+  return { assignment, teamSummary: teams.map((t) => ({ teamId: t.id, instructorCount: t.instructorIds.length, topicCount: t.topicCount })) };
+}
+
+/** Writes a computed assignment (from computeBalancedTeamAssignment) to Firestore in batches. */
+export async function applyTeamAssignment(assignment) {
+  const entries = Array.from(assignment.entries());
+  const BATCH_SIZE = 400;
+  for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+    const batch = writeBatch(db);
+    for (const [instructorId, teamId] of entries.slice(i, i + BATCH_SIZE)) {
+      batch.update(doc(db, "instructors", instructorId), { assignedTo: teamId });
+    }
+    await batch.commit();
+  }
 }
