@@ -64,7 +64,6 @@
       signInAsInstructor,
       signInAsAdmin,
       signInAsTeam,
-      onAuthChange,
     } from "./app.js";
 
     const $ = (id) => document.getElementById(id);
@@ -123,17 +122,6 @@
       }
     });
 
-    // If already signed in with a known identity, skip straight ahead
-    onAuthChange((user) => {
-      if (!user) return;
-      if (window.sessionStorage.getItem("isAdmin") === "true") {
-        window.location.href = "admin.html";
-      } else if (window.sessionStorage.getItem("teamId")) {
-        window.location.href = "team-dashboard.html";
-      } else if (window.sessionStorage.getItem("guestInstructorId")) {
-        window.location.href = "dashboard.html";
-      }
-    });
   </script>
 </body>
 </html>
