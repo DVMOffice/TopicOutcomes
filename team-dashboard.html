@@ -48,8 +48,8 @@
   <!-- Logic for this page: read-only progress view for a support team.
        Identity -> app.js. Data -> dataEngine.js -->
   <script type="module">
-    import { onAuthChange, logOut, getCurrentTeam } from "./app.js";
-    import { getAllInstructors, getAllTopics, getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV } from "./dataEngine.js";
+    import { onAuthChange, logOut, getCurrentTeam, getAllInstructors } from "./app.js";
+    import { getAllTopics, getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV } from "./dataEngine.js";
 
     const $ = (id) => document.getElementById(id);
 
