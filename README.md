@@ -1,4 +1,4 @@
-# Learning Outcomes Collection System
+#  Learning Outcomes Collection System
 
 A system for instructors to collaborate on building the final list of
 learning outcomes for each academic topic, so the administrator doesn't
