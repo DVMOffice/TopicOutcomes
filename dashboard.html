@@ -28,7 +28,7 @@
       </div>
     </div>
 
-    <h2 class="section-heading"><span class="icon">📚</span> My assigned courses and topics</h2>
+    <h2 class="section-heading"><span class="icon">📚</span> My assigned courses and sessions</h2>
     <div id="course-accordion"></div>
   </div>
 
@@ -70,7 +70,7 @@
 
         item.innerHTML = `
           <div class="accordion-header">
-            <span>Course ${course} <span class="text-muted">(${topics.length} topics)</span></span>
+            <span>Course ${course} <span class="text-muted">(${topics.length} sessions)</span></span>
             <span class="flex gap-2" style="align-items:center;">
               <span class="text-muted">${avgPct}%</span>
               <span class="chevron">▾</span>
@@ -107,10 +107,10 @@
 
       const topics = await getTopicsForInstructor(instructor.instructorId);
       const years = [...new Set(topics.map((t) => t.academicYear))];
-      $("year-label").textContent = years.join(", ") || "No topics assigned";
+      $("year-label").textContent = years.join(", ") || "No sessions assigned";
 
       const summary = summarizeInstructorProgress(topics);
-      $("progress-summary").textContent = `Progress: ${summary.percent}% — Topics completed: ${summary.complete} / ${summary.total}`;
+      $("progress-summary").textContent = `Progress: ${summary.percent}% — Sessions completed: ${summary.complete} / ${summary.total}`;
       $("progress-fill").style.width = `${summary.percent}%`;
 
       renderAccordion(groupByCourse(topics));
