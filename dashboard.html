@@ -36,7 +36,7 @@
        Identity (who am I) -> app.js. Topic/progress data -> dataEngine.js -->
   <script type="module">
     import { onAuthChange, logOut, getCurrentInstructor } from "./app.js";
-    import { getTopicsForInstructor, summarizeInstructorProgress, topicPercent } from "./dataEngine.js";
+    import { getTopicsForInstructor, summarizeInstructorProgress, topicPercent, countUntaggedOutcomes, topicHasUntagged } from "./dataEngine.js";
 
     const $ = (id) => document.getElementById(id);
 
@@ -83,6 +83,7 @@
               <div class="flex-between mt-2">
                 <a href="topic.html?id=${t.id}">${t.topicName}</a>
                 <span class="flex gap-2" style="align-items:center;">
+                  ${topicHasUntagged(t) ? `<span title="Some outcomes are missing species/organ system" style="color:#92400e; font-size:0.85rem;">⚠</span>` : ""}
                   <span class="badge badge-${t.completionStatus.replace("_", "-")}">${t.completionStatus.replace("_", " ")}</span>
                   <span class="text-muted">${topicPercent(t)}%</span>
                 </span>
@@ -110,7 +111,10 @@
       $("year-label").textContent = years.join(", ") || "No sessions assigned";
 
       const summary = summarizeInstructorProgress(topics);
-      $("progress-summary").textContent = `Progress: ${summary.percent}% — Sessions completed: ${summary.complete} / ${summary.total}`;
+      const untagged = countUntaggedOutcomes(topics);
+      $("progress-summary").textContent =
+        `Progress: ${summary.percent}% — Sessions completed: ${summary.complete} / ${summary.total}` +
+        (untagged > 0 ? ` · ⚠ ${untagged} outcome(s) missing species/organ system` : "");
       $("progress-fill").style.width = `${summary.percent}%`;
 
       renderAccordion(groupByCourse(topics));
