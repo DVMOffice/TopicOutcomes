@@ -117,7 +117,7 @@
     import {
       getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible,
       getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV, assignInstructorToTeam,
-      computeBalancedTeamAssignment, applyTeamAssignment,
+      computeBalancedTeamAssignment, applyTeamAssignment, countUntaggedOutcomes,
     } from "./dataEngine.js";
     import { importNow } from "./importEngine.js";
 
@@ -191,8 +191,9 @@
           const assigned = allTopics.filter((t) => (t.assignedInstructorIDs || []).includes(instr.instructorId));
           const complete = assigned.filter((t) => t.completionStatus === "complete").length;
           const outcomeCount = assigned.reduce((sum, t) => sum + (t.outcomes || []).length, 0);
+          const untagged = countUntaggedOutcomes(assigned);
           const pct = assigned.length === 0 ? 0 : Math.round((complete / assigned.length) * 100);
-          return { name: instr.name, pct, total: assigned.length, complete, outcomeCount };
+          return { name: instr.name, pct, total: assigned.length, complete, outcomeCount, untagged };
         })
         .filter((r) => r.total > 0)
         .sort((a, b) => b.pct - a.pct);
@@ -207,9 +208,10 @@
               (r) => `
         <div class="flex-between mt-2">
           <span>${r.name}</span>
-          <span class="flex gap-2" style="align-items:center; width:280px;">
+          <span class="flex gap-2" style="align-items:center; width:${r.untagged > 0 ? 320 : 280}px;">
             <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
             <span class="text-muted" style="width:170px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} sessions · ${r.outcomeCount} outcomes</span>
+            ${r.untagged > 0 ? `<span title="Outcomes missing species/organ system" style="color:#92400e; font-size:0.8rem; white-space:nowrap;">⚠ ${r.untagged}</span>` : ""}
           </span>
         </div>
       `
@@ -236,8 +238,9 @@
         .map(([label, topics]) => {
           const complete = topics.filter((t) => t.completionStatus === "complete").length;
           const outcomeCount = topics.reduce((sum, t) => sum + (t.outcomes || []).length, 0);
+          const untagged = countUntaggedOutcomes(topics);
           const pct = topics.length === 0 ? 0 : Math.round((complete / topics.length) * 100);
-          return { label, complete, total: topics.length, pct, outcomeCount };
+          return { label, complete, total: topics.length, pct, outcomeCount, untagged };
         })
         .sort((a, b) => a.label.localeCompare(b.label));
 
@@ -246,9 +249,10 @@
           (r) => `
         <div class="flex-between mt-2">
           <span>${r.label}</span>
-          <span class="flex gap-2" style="align-items:center; width:280px;">
+          <span class="flex gap-2" style="align-items:center; width:${r.untagged > 0 ? 320 : 280}px;">
             <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
             <span class="text-muted" style="width:170px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} sessions · ${r.outcomeCount} outcomes</span>
+            ${r.untagged > 0 ? `<span title="Outcomes missing species/organ system" style="color:#92400e; font-size:0.8rem; white-space:nowrap;">⚠ ${r.untagged}</span>` : ""}
           </span>
         </div>
       `
