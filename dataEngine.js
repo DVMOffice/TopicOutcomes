@@ -74,7 +74,7 @@ export async function addOutcome(topicId, { text, species, organSystem, instruct
   const ref = doc(db, "topics", topicId);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
-    if (!snap.exists()) throw new Error("Topic not found");
+    if (!snap.exists()) throw new Error("Session not found");
     const data = snap.data();
     const outcomes = data.outcomes || [];
     const now = Timestamp.now();
@@ -113,7 +113,7 @@ export async function addOutcomesBulk(topicId, texts, { species, organSystem, in
   const ref = doc(db, "topics", topicId);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
-    if (!snap.exists()) throw new Error("Topic not found");
+    if (!snap.exists()) throw new Error("Session not found");
     const data = snap.data();
     const outcomes = data.outcomes || [];
     const now = Timestamp.now();
@@ -145,7 +145,7 @@ export async function updateOutcome(topicId, outcomeNumber, { text, species, org
   const ref = doc(db, "topics", topicId);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
-    if (!snap.exists()) throw new Error("Topic not found");
+    if (!snap.exists()) throw new Error("Session not found");
     const data = snap.data();
     const outcomes = [...(data.outcomes || [])];
     const idx = outcomes.findIndex((o) => o.outcomeNumber === outcomeNumber);
@@ -176,7 +176,7 @@ export async function deleteOutcome(topicId, outcomeNumber, { instructorId, inst
   const ref = doc(db, "topics", topicId);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
-    if (!snap.exists()) throw new Error("Topic not found");
+    if (!snap.exists()) throw new Error("Session not found");
     const data = snap.data();
     const outcomes = (data.outcomes || [])
       .filter((o) => o.outcomeNumber !== outcomeNumber)
@@ -367,7 +367,7 @@ export async function resolveTopicSlot(topicId, oldInstructorId, oldRawName, new
   const ref = doc(db, "topics", topicId);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
-    if (!snap.exists()) throw new Error("Topic not found");
+    if (!snap.exists()) throw new Error("Session not found");
     const data = snap.data();
 
     const ids = new Set(data.assignedInstructorIDs || []);
