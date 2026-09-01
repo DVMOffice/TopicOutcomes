@@ -27,7 +27,7 @@
             <tr>
               <th>Date</th>
               <th>Target</th>
-              <th>Target topics</th>
+              <th>Target sessions</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -89,7 +89,7 @@
           <tr>
             <td>${g.label}</td>
             <td>${g.pct}%</td>
-            <td>${targetTopics} topics</td>
+            <td>${targetTopics} sessions</td>
             <td>${statusHtml}</td>
           </tr>
         `;
@@ -152,7 +152,7 @@
 
       $("overall-fill").style.width = `${progress.pct}%`;
       $("overall-summary").textContent =
-        `${progress.pct}% complete — ${progress.complete} of ${progress.topicCount} topics, ${progress.outcomeCount} outcomes written across ${progress.instructors.length} instructors`;
+        `${progress.pct}% complete — ${progress.complete} of ${progress.topicCount} sessions, ${progress.outcomeCount} outcomes written across ${progress.instructors.length} instructors`;
 
       renderGoalTable(progress.topicCount, progress.complete);
       renderRoster(progress.instructors, allTopics);
