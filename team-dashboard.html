@@ -17,6 +17,7 @@
       <h2 class="section-heading"><span class="icon">📈</span> Overall progress</h2>
       <div class="progress-track mt-2"><div class="progress-fill" id="overall-fill" style="width:0%"></div></div>
       <p class="text-muted mt-2" id="overall-summary"></p>
+      <div id="untagged-summary-badge" class="mt-2" style="display:none;"></div>
     </div>
 
     <div class="card mb-4">
@@ -121,7 +122,7 @@
           <span class="flex gap-2" style="align-items:center; width:${r.untagged > 0 ? 260 : 220}px;">
             <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
             <span class="text-muted" style="width:110px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} (${r.pct}%)</span>
-            ${r.untagged > 0 ? `<span title="Outcomes missing species/organ system" style="color:#92400e; font-size:0.8rem; white-space:nowrap;">⚠ ${r.untagged}</span>` : ""}
+            ${r.untagged > 0 ? `<span title="Outcomes missing species/organ system" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a; border-radius:6px; padding:1px 7px; font-size:0.75rem; font-weight:600; white-space:nowrap;">⚠ ${r.untagged}</span>` : ""}
           </span>
         </div>
       `
@@ -156,8 +157,15 @@
       const teamTopics = currentTopics.filter((t) => (t.assignedInstructorIDs || []).some((id) => memberIds.has(id)));
       const untagged = countUntaggedOutcomes(teamTopics);
       $("overall-summary").textContent =
-        `${progress.pct}% complete — ${progress.complete} of ${progress.topicCount} sessions, ${progress.outcomeCount} outcomes written across ${progress.instructors.length} instructors` +
-        (untagged > 0 ? ` · ⚠ ${untagged} outcome(s) missing species/organ system` : "");
+        `${progress.pct}% complete — ${progress.complete} of ${progress.topicCount} sessions, ${progress.outcomeCount} outcomes written across ${progress.instructors.length} instructors`;
+
+      const untaggedBadge = $("untagged-summary-badge");
+      if (untagged > 0) {
+        untaggedBadge.style.display = "inline-block";
+        untaggedBadge.innerHTML = `<span style="background:#fef3c7; color:#92400e; border:1px solid #fde68a; border-radius:6px; padding:4px 10px; font-size:0.85rem; font-weight:600;">⚠ ${untagged} outcome(s) missing species/organ system</span>`;
+      } else {
+        untaggedBadge.style.display = "none";
+      }
 
       renderGoalTable(progress.topicCount, progress.complete);
       renderRoster(progress.instructors, allTopics);
