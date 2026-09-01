@@ -16,7 +16,7 @@
   <div class="main-content">
     <div class="card mb-4" id="import-section">
       <h3 class="section-heading"><span class="icon">📥</span> Import data from Excel</h3>
-      <p class="text-muted">Upload the two original files and import right away. Names that match confidently link automatically; anything ambiguous imports as a placeholder you can fix later, one topic at a time, in "Review topics" below — nothing blocks the import.</p>
+      <p class="text-muted">Upload the two original files and import right away. Names that match confidently link automatically; anything that can't be identified as a real name is skipped instead of guessed — see "Names that couldn't be identified" below.</p>
       <div class="form-group mt-2">
         <label for="file-master">Master list (Topicinstructor_master_list.xlsx)</label>
         <input type="file" id="file-master" accept=".xlsx" />
@@ -36,8 +36,8 @@
     </div>
 
     <div class="card-grid mb-4">
-      <div class="card"><h3 id="stat-total">0</h3><span class="text-muted">Total topics</span></div>
-      <div class="card"><h3 id="stat-complete">0</h3><span class="text-muted">Completed topics</span></div>
+      <div class="card"><h3 id="stat-total">0</h3><span class="text-muted">Total sessions</span></div>
+      <div class="card"><h3 id="stat-complete">0</h3><span class="text-muted">Completed sessions</span></div>
       <div class="card"><h3 id="stat-progress">0</h3><span class="text-muted">In progress</span></div>
       <div class="card"><h3 id="stat-missing">0</h3><span class="text-muted">Not started</span></div>
       <div class="card"><h3 id="stat-instructors">0</h3><span class="text-muted">Total instructors</span></div>
@@ -53,7 +53,7 @@
 
       <div class="card">
         <h3 class="section-heading"><span class="icon">🏫</span> Progress by course</h3>
-        <p class="text-muted mt-1" style="font-size:0.85rem;">For your weekly report — how many topics and outcomes exist per course.</p>
+        <p class="text-muted mt-1" style="font-size:0.85rem;">For your weekly report — how many sessions and outcomes exist per course.</p>
         <div id="course-progress" class="mt-2" style="max-height:340px; overflow-y:auto;"></div>
       </div>
     </div>
@@ -66,7 +66,7 @@
 
     <div class="card mb-4">
       <h3 class="section-heading"><span class="icon">🏷️</span> Assign instructors to a team</h3>
-      <p class="text-muted mt-1" style="font-size:0.85rem;">Auto-assign balances the 4 teams by topic count using your live data right now — busiest instructors get spread out first. You'll see the result before anything is saved.</p>
+      <p class="text-muted mt-1" style="font-size:0.85rem;">Auto-assign balances the 4 teams by session count using your live data right now — busiest instructors get spread out first. You'll see the result before anything is saved.</p>
       <button class="btn btn-primary mt-2" id="btn-auto-assign">🎲 Auto-assign to 4 teams</button>
       <div id="auto-assign-preview" class="mt-2"></div>
 
@@ -144,7 +144,7 @@
         });
         $("import-status").textContent =
           `Done: ${result.totalInstructors} instructors (${result.instructorsWithoutEmail} without email), ` +
-          `${result.totalTopics} topics imported, ${result.excludedRows} rows excluded (labs/exams/etc.), ` +
+          `${result.totalTopics} sessions imported, ${result.excludedRows} rows excluded (labs/exams/etc.), ` +
           `${result.newInstructorsWithoutEmail} new instructor(s) added without an email on file (searchable by name; add their email to the spreadsheet and re-import to link it).`;
         renderDroppedNames(result.droppedRawTexts);
 
@@ -209,7 +209,7 @@
           <span>${r.name}</span>
           <span class="flex gap-2" style="align-items:center; width:280px;">
             <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
-            <span class="text-muted" style="width:170px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} topics · ${r.outcomeCount} outcomes</span>
+            <span class="text-muted" style="width:170px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} sessions · ${r.outcomeCount} outcomes</span>
           </span>
         </div>
       `
@@ -248,7 +248,7 @@
           <span>${r.label}</span>
           <span class="flex gap-2" style="align-items:center; width:280px;">
             <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
-            <span class="text-muted" style="width:170px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} topics · ${r.outcomeCount} outcomes</span>
+            <span class="text-muted" style="width:170px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} sessions · ${r.outcomeCount} outcomes</span>
           </span>
         </div>
       `
@@ -265,7 +265,7 @@
           <span style="min-width:70px; font-weight:600;">${r.teamId}</span>
           <span class="flex gap-2" style="align-items:center; flex:1; min-width:200px;">
             <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
-            <span class="text-muted" style="width:190px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.topicCount} topics · ${r.instructors.length} instructors</span>
+            <span class="text-muted" style="width:190px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.topicCount} sessions · ${r.instructors.length} instructors</span>
           </span>
           <button class="btn btn-secondary export-team-btn" data-team="${r.teamId}" style="font-size:0.8rem; padding:6px 12px;">⬇ CSV</button>
         </div>
@@ -332,7 +332,7 @@
         <div class="mt-2" style="border:1px solid var(--color-border); border-radius:var(--radius-md); padding:var(--space-3);">
           <p style="margin:0 0 8px; font-weight:600;">Preview (nothing saved yet):</p>
           ${teamSummary
-            .map((t) => `<div>${t.teamId}: ${t.instructorCount} instructors, ${t.topicCount} topics</div>`)
+            .map((t) => `<div>${t.teamId}: ${t.instructorCount} instructors, ${t.topicCount} sessions</div>`)
             .join("")}
           <p class="text-muted mt-2" style="font-size:0.8rem;">This replaces the CURRENT team assignment for every instructor. Any manual changes you've made below will be overwritten.</p>
           <div class="flex gap-2 mt-2">
