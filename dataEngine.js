@@ -208,6 +208,26 @@ export function topicPercent(topic) {
   return Math.min(100, Math.round((n / MIN_OUTCOMES) * 100));
 }
 
+/**
+ * Counts outcomes missing species and/or organSystem — a topic can show
+ * "complete" (enough outcomes written) while still having some untagged.
+ * This is tracked separately rather than folded into completionStatus,
+ * so it doesn't retroactively change anyone's % progress.
+ */
+export function countUntaggedOutcomes(topics) {
+  let count = 0;
+  for (const t of topics) {
+    for (const o of t.outcomes || []) {
+      if (!o.species || !o.organSystem) count++;
+    }
+  }
+  return count;
+}
+
+export function topicHasUntagged(topic) {
+  return (topic.outcomes || []).some((o) => !o.species || !o.organSystem);
+}
+
 // ================================================================
 // EXPORT (flat, ready for Power Query)
 // ================================================================
