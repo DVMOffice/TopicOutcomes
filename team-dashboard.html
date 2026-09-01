@@ -49,16 +49,15 @@
        Identity -> app.js. Data -> dataEngine.js -->
   <script type="module">
     import { onAuthChange, logOut, getCurrentTeam, getAllInstructors } from "./app.js";
-    import { getAllTopics, getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV } from "./dataEngine.js";
+    import { getAllTopics, getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV, countUntaggedOutcomes } from "./dataEngine.js";
 
     const $ = (id) => document.getElementById(id);
 
-    // The weekly goal plan — edit these five milestones if the plan changes.
+    // The weekly goal plan — edit these milestones if the plan changes.
     const GOALS = [
-      { date: "2026-09-04", label: "Sep 4", pct: 5 },
-      { date: "2026-09-11", label: "Sep 11", pct: 35 },
-      { date: "2026-09-18", label: "Sep 18", pct: 70 },
-      { date: "2026-09-25", label: "Sep 25", pct: 95 },
+      { date: "2026-09-11", label: "Sep 11", pct: 30 },
+      { date: "2026-09-18", label: "Sep 18", pct: 60 },
+      { date: "2026-09-25", label: "Sep 25", pct: 90 },
       { date: "2026-10-02", label: "Oct 2", pct: 100 },
     ];
 
@@ -105,8 +104,9 @@
         .map((instr) => {
           const assigned = allTopics.filter((t) => (t.assignedInstructorIDs || []).includes(instr.instructorId));
           const complete = assigned.filter((t) => t.completionStatus === "complete").length;
+          const untagged = countUntaggedOutcomes(assigned);
           const pct = assigned.length === 0 ? 0 : Math.round((complete / assigned.length) * 100);
-          return { name: instr.name, email: instr.email, complete, total: assigned.length, pct };
+          return { name: instr.name, email: instr.email, complete, total: assigned.length, pct, untagged };
         })
         .sort((a, b) => a.pct - b.pct); // least progress first, so it's obvious who to follow up with
 
@@ -118,9 +118,10 @@
             <div>${r.name}</div>
             <div class="text-muted" style="font-size:0.8rem;">${r.email || "No email on file"}</div>
           </div>
-          <span class="flex gap-2" style="align-items:center; width:220px;">
+          <span class="flex gap-2" style="align-items:center; width:${r.untagged > 0 ? 260 : 220}px;">
             <div class="progress-track" style="flex:1;"><div class="progress-fill" style="width:${r.pct}%"></div></div>
             <span class="text-muted" style="width:110px; text-align:right; font-size:0.8rem;">${r.complete} of ${r.total} (${r.pct}%)</span>
+            ${r.untagged > 0 ? `<span title="Outcomes missing species/organ system" style="color:#92400e; font-size:0.8rem; white-space:nowrap;">⚠ ${r.untagged}</span>` : ""}
           </span>
         </div>
       `
@@ -151,8 +152,12 @@
       currentTopics = allTopics;
 
       $("overall-fill").style.width = `${progress.pct}%`;
+      const memberIds = new Set(progress.instructors.map((i) => i.instructorId));
+      const teamTopics = currentTopics.filter((t) => (t.assignedInstructorIDs || []).some((id) => memberIds.has(id)));
+      const untagged = countUntaggedOutcomes(teamTopics);
       $("overall-summary").textContent =
-        `${progress.pct}% complete — ${progress.complete} of ${progress.topicCount} sessions, ${progress.outcomeCount} outcomes written across ${progress.instructors.length} instructors`;
+        `${progress.pct}% complete — ${progress.complete} of ${progress.topicCount} sessions, ${progress.outcomeCount} outcomes written across ${progress.instructors.length} instructors` +
+        (untagged > 0 ? ` · ⚠ ${untagged} outcome(s) missing species/organ system` : "");
 
       renderGoalTable(progress.topicCount, progress.complete);
       renderRoster(progress.instructors, allTopics);
