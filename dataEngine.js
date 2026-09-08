@@ -558,3 +558,39 @@ export async function applyTeamAssignment(assignment) {
     await batch.commit();
   }
 }
+
+/**
+ * One-time maintenance: re-checks every existing topic's completionStatus
+ * against the CURRENT rules (MIN_OUTCOMES above) and updates any topic
+ * whose status changed. Safe to run any time — never touches outcomes
+ * themselves, only the status label. Run this once after changing
+ * MIN_OUTCOMES, so already-written sessions reflect the new threshold
+ * without needing someone to re-edit them.
+ */
+export async function recalculateAllCompletionStatuses(onProgress = () => {}) {
+  const snap = await getDocs(collection(db, "topics"));
+  const allDocs = snap.docs;
+  const toUpdate = [];
+
+  for (const d of allDocs) {
+    const data = d.data();
+    const correctStatus = computeStatus(data.outcomes || []);
+    if (data.completionStatus !== correctStatus) {
+      toUpdate.push({ ref: d.ref, newStatus: correctStatus, oldStatus: data.completionStatus });
+    }
+  }
+
+  const BATCH_SIZE = 400;
+  for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
+    const batch = writeBatch(db);
+    for (const item of toUpdate.slice(i, i + BATCH_SIZE)) {
+      batch.update(item.ref, { completionStatus: item.newStatus });
+    }
+    await batch.commit();
+    onProgress(`Updated ${Math.min(i + BATCH_SIZE, toUpdate.length)} of ${toUpdate.length}...`);
+  }
+
+  const summary = { totalChecked: allDocs.length, totalUpdated: toUpdate.length };
+  const becameComplete = toUpdate.filter((t) => t.newStatus === "complete").length;
+  return { ...summary, becameComplete };
+}
