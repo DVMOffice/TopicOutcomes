@@ -131,7 +131,7 @@
     import {
       getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible,
       getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV, assignInstructorToTeam,
-      computeBalancedTeamAssignment, applyTeamAssignment, countUntaggedOutcomes, recalculateAllCompletionStatuses, resolveTopicSlot,
+      computeBalancedTeamAssignment, applyTeamAssignment, countUntaggedOutcomes, recalculateAllCompletionStatuses, resolveTopicSlot, renameSession,
     } from "./dataEngine.js";
     import { importNow } from "./importEngine.js";
 
@@ -402,8 +402,11 @@
           return `
         <div class="accordion-item" style="margin-bottom:8px;">
           <div style="padding:12px;">
-            <strong>${t.academicYear} · Course ${t.course} · ${t.topicName}</strong>
-            <div class="text-muted" style="font-size:0.8rem; margin-top:2px;">${(t.outcomes || []).length} outcome(s) already on this session — these are never touched by a swap.</div>
+            <div class="flex-between" style="align-items:center; flex-wrap:wrap; gap:8px;">
+              <strong>${t.academicYear} · Course ${t.course} · ${t.topicName}</strong>
+              <button class="btn btn-secondary rename-btn" data-topic="${t.id}" data-current-name="${t.topicName}" style="font-size:0.8rem; padding:4px 12px;">✏️ Rename</button>
+            </div>
+            <div class="text-muted" style="font-size:0.8rem; margin-top:2px;">${(t.outcomes || []).length} outcome(s) already on this session — these are never touched by a swap or rename.</div>
             ${currentInstructors
               .map(
                 (instr) => `
@@ -454,6 +457,29 @@
             alert("Error: " + err.message);
             btn.disabled = false;
             btn.textContent = "Swap";
+          }
+        });
+      });
+
+      container.querySelectorAll(".rename-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const topicId = btn.dataset.topic;
+          const currentName = btn.dataset.currentName;
+          const newName = window.prompt("New session name:", currentName);
+          if (newName === null) return; // cancelled
+          if (newName.trim() === currentName) return; // no change
+
+          btn.disabled = true;
+          btn.textContent = "Saving...";
+          try {
+            await renameSession(topicId, newName);
+            allTopics = await getAllTopics();
+            renderReassignResults($("reassign-search").value.trim());
+            renderCourseProgress();
+          } catch (err) {
+            alert("Error: " + err.message);
+            btn.disabled = false;
+            btn.textContent = "✏️ Rename";
           }
         });
       });
