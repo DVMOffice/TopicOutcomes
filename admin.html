@@ -29,6 +29,20 @@
       <p class="text-muted mt-2" id="import-status"></p>
     </div>
 
+    <div class="card mb-4" id="recalc-section">
+      <h3 class="section-heading"><span class="icon">🔄</span> Recalculate completion status</h3>
+      <p class="text-muted">Run this once after changing the completion threshold in the code. It checks every existing session against the current rule and updates its status — nothing is added, removed, or changed about the outcomes themselves, only the "Complete/In progress" label.</p>
+      <button class="btn btn-secondary" id="btn-recalc">🔄 Recalculate all sessions</button>
+      <p class="text-muted mt-2" id="recalc-status"></p>
+    </div>
+
+    <div class="card mb-4" id="reassign-section">
+      <h3 class="section-heading"><span class="icon">🔀</span> Reassign a session's instructor</h3>
+      <p class="text-muted">For one-off corrections (e.g. an instructor swap) without touching the bulk import. Safe with instructors actively working — this only changes who's assigned, never the outcomes, status, or activity history already on that session.</p>
+      <input type="search" id="reassign-search" placeholder="🔍 Search by session name or course number..." class="mt-2 mb-2" />
+      <div id="reassign-results" style="max-height:400px; overflow-y:auto;"></div>
+    </div>
+
     <div class="card mb-4">
       <h2 id="overall-title">Overall progress</h2>
       <div class="progress-track"><div class="progress-fill" id="overall-fill" style="width:0%"></div></div>
@@ -117,7 +131,7 @@
     import {
       getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible,
       getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV, assignInstructorToTeam,
-      computeBalancedTeamAssignment, applyTeamAssignment, countUntaggedOutcomes,
+      computeBalancedTeamAssignment, applyTeamAssignment, countUntaggedOutcomes, recalculateAllCompletionStatuses, resolveTopicSlot,
     } from "./dataEngine.js";
     import { importNow } from "./importEngine.js";
 
@@ -325,6 +339,125 @@
     }
 
     $("assign-team-search").addEventListener("input", (e) => renderAssignTeamList(e.target.value.trim()));
+
+    $("btn-recalc").addEventListener("click", async () => {
+      const ok = window.confirm(
+        "This will check every session against the current completion rule and update its status where needed. " +
+        "It's safe — outcomes themselves are never touched, only the Complete/In progress label. Continue?"
+      );
+      if (!ok) return;
+
+      $("btn-recalc").disabled = true;
+      $("recalc-status").textContent = "Checking all sessions...";
+      try {
+        const result = await recalculateAllCompletionStatuses((msg) => { $("recalc-status").textContent = msg; });
+        $("recalc-status").textContent =
+          `Done. Checked ${result.totalChecked} sessions — ${result.totalUpdated} updated, ${result.becameComplete} newly marked Complete.`;
+
+        allTopics = await getAllTopics();
+        renderStats();
+        renderInstructorProgress();
+        renderCourseProgress();
+        renderTeamProgress();
+        refreshPreview();
+      } catch (err) {
+        $("recalc-status").textContent = "Error: " + err.message;
+      } finally {
+        $("btn-recalc").disabled = false;
+      }
+    });
+
+    $("reassign-search").addEventListener("input", (e) => renderReassignResults(e.target.value.trim()));
+
+    function renderReassignResults(term) {
+      const container = $("reassign-results");
+      if (!term || term.length < 2) {
+        container.innerHTML = `<p class="text-muted">Type at least 2 characters to search.</p>`;
+        return;
+      }
+
+      const termLower = term.toLowerCase();
+      const matches = allTopics.filter(
+        (t) => t.topicName.toLowerCase().includes(termLower) || String(t.course).includes(term)
+      );
+
+      if (matches.length === 0) {
+        container.innerHTML = `<p class="text-muted">No sessions match that search.</p>`;
+        return;
+      }
+
+      const instructorById = new Map(allInstructors.map((i) => [i.instructorId, i]));
+      const allInstructorOptions = allInstructors
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((i) => `<option value="${i.instructorId}" data-name="${i.name}">${i.name}</option>`)
+        .join("");
+
+      container.innerHTML = matches
+        .map((t) => {
+          const currentInstructors = (t.assignedInstructorIDs || [])
+            .map((id) => instructorById.get(id))
+            .filter(Boolean);
+
+          return `
+        <div class="accordion-item" style="margin-bottom:8px;">
+          <div style="padding:12px;">
+            <strong>${t.academicYear} · Course ${t.course} · ${t.topicName}</strong>
+            <div class="text-muted" style="font-size:0.8rem; margin-top:2px;">${(t.outcomes || []).length} outcome(s) already on this session — these are never touched by a swap.</div>
+            ${currentInstructors
+              .map(
+                (instr) => `
+              <div class="flex gap-2 mt-2" style="align-items:center; flex-wrap:wrap;">
+                <span style="min-width:160px;">${instr.name}</span>
+                <span class="text-muted" style="font-size:0.85rem;">→</span>
+                <select class="reassign-select" data-topic="${t.id}" data-old-id="${instr.instructorId}" data-old-name="${instr.name}" style="min-width:200px;">
+                  <option value="">Replace with...</option>
+                  ${allInstructorOptions}
+                </select>
+                <button class="btn btn-secondary reassign-btn" data-topic="${t.id}" data-old-id="${instr.instructorId}" data-old-name="${instr.name}" style="font-size:0.85rem; padding:6px 14px;">Swap</button>
+              </div>
+            `
+              )
+              .join("")}
+          </div>
+        </div>
+      `;
+        })
+        .join("");
+
+      container.querySelectorAll(".reassign-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const topicId = btn.dataset.topic;
+          const oldId = btn.dataset.oldId;
+          const oldName = btn.dataset.oldName;
+          const select = container.querySelector(`.reassign-select[data-topic="${topicId}"][data-old-id="${oldId}"]`);
+          const newId = select.value;
+          const newName = select.selectedOptions[0]?.dataset.name;
+
+          if (!newId) {
+            alert("Choose a replacement instructor first.");
+            return;
+          }
+          const ok = window.confirm(`Replace "${oldName}" with "${newName}" on this session? Outcomes already written are not affected.`);
+          if (!ok) return;
+
+          btn.disabled = true;
+          btn.textContent = "Saving...";
+          try {
+            await resolveTopicSlot(topicId, oldId, oldName, [{ instructorId: newId, name: newName }]);
+            allTopics = await getAllTopics();
+            renderReassignResults($("reassign-search").value.trim());
+            renderInstructorProgress();
+            renderCourseProgress();
+            renderTeamProgress();
+          } catch (err) {
+            alert("Error: " + err.message);
+            btn.disabled = false;
+            btn.textContent = "Swap";
+          }
+        });
+      });
+    }
 
     let pendingAssignment = null;
 
