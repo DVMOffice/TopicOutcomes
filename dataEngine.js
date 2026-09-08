@@ -381,6 +381,18 @@ function replaceInArray(arr, oldValue, newValues) {
  * leaves that topic's slot as-is (no-op — use this if they intentionally
  * skip a topic for now).
  */
+/**
+ * Renames a session's display name (topicName only). Does not touch
+ * outcomes, instructors, status, or activity history — and does not
+ * change the topic's ID (the document itself stays the same), so
+ * nothing about how it's found or linked to breaks.
+ */
+export async function renameSession(topicId, newName) {
+  const trimmed = (newName || "").trim();
+  if (!trimmed) throw new Error("Name can't be empty.");
+  await updateDoc(doc(db, "topics", topicId), { topicName: trimmed });
+}
+
 export async function resolveTopicSlot(topicId, oldInstructorId, oldRawName, newInstructors) {
   if (!newInstructors || newInstructors.length === 0) return { updated: false };
 
