@@ -25,7 +25,7 @@
  * ---------------------------------------------------------------
  */
 import { db } from "./firebaseConfig.js";
-import { collection, doc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, doc, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // Requires admin.html to include:
 // <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -350,5 +350,172 @@ export async function importNow(masterListFile, emailsListFile, onProgress = () 
     excludedRows: excludedCount,
     newInstructorsWithoutEmail,
     droppedRawTexts,
+  };
+}
+
+// ================================================================
+// IMPORT LAB SESSIONS ONLY (separate file, separate flow)
+// ================================================================
+// This file has a different layout than the master list (single
+// "Timetable" sheet with a "Year" column, instead of one sheet per
+// year) — read directly with its own column names, no need to
+// reformat the source file.
+//
+// Safety rule: if a session already exists (same year + course +
+// name as something already in Firestore), that row is SKIPPED
+// entirely — never merged, never overwritten. Only genuinely new
+// sessions get uploaded. This guarantees existing outcomes can never
+// be touched by this tool.
+
+async function readLabTimetable(file) {
+  const wb = await readWorkbook(file);
+  const sheetName = wb.SheetNames.includes("Timetable") ? "Timetable" : wb.SheetNames[0];
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: "", range: "A1:Q3000" });
+  return rows.map((r) => ({
+    Year: r["Year"], Course: r["Course"], Type: r["Type"], Topic: r["Topic"],
+    "Primary Instructor": r["Primary Instructor"], "Secondary Instructor": r["Secondary Instructor"], "Finalized Instructors": r["Finalized Instructors"],
+  }));
+}
+
+function yearLabel(rawYear) {
+  const n = String(rawYear).trim();
+  return n ? `Year ${n}` : "";
+}
+
+function isRealLabRow(row) {
+  const type = String(row.Type ?? "").trim().toUpperCase();
+  const topic = String(row.Topic ?? "").trim();
+  if (!topic) return false;
+  if (type !== "LAB") return false; // this tool only ever uploads LAB rows, defensively
+  const topicLower = topic.toLowerCase();
+  if (EXCLUDED_TOPIC_KEYWORDS.some((kw) => topicLower.includes(kw))) return false;
+  const course = row.Course;
+  const hasCourse = course !== 0 && course !== "0" && course !== undefined && course !== null && course !== "";
+  const year = yearLabel(row.Year);
+  return hasCourse && !!year;
+}
+
+/**
+ * Resolves a raw instructor name against EXISTING instructors already
+ * in Firestore first (exact/embedded match) — this file has no
+ * companion email list, so known people are matched by name alone.
+ * Falls back to the same clean-name extraction used by the main
+ * importer for genuinely new people.
+ */
+function resolveAgainstExisting(text, existingByName) {
+  const exact = existingByName.get(normalizeNameKey(text));
+  if (exact) return [exact];
+
+  const haystack = normalizeNameKey(text);
+  const embedded = Array.from(existingByName.values()).filter((e) => haystack.includes(normalizeNameKey(e.name)));
+  if (embedded.length > 0) return embedded;
+
+  const extracted = extractNameCandidates(text);
+  if (extracted.length > 0) {
+    return extracted.map((name) => existingByName.get(normalizeNameKey(name)) || { name: name.trim(), email: "", instructorId: null });
+  }
+  return [];
+}
+
+function resolveLabInstructor(rawText, existingByName) {
+  if (/\bor\b/i.test(rawText)) {
+    const segs = rawText.split(/\s+or\s+/i).map((s) => s.trim()).filter(Boolean);
+    return segs.flatMap((s) => resolveAgainstExisting(s, existingByName));
+  }
+  return resolveAgainstExisting(rawText, existingByName);
+}
+
+export async function importLabsOnly(labFile, onProgress = () => {}) {
+  onProgress("Reading the lab file...");
+  const rows = await readLabTimetable(labFile);
+
+  onProgress("Checking what's already in Firestore...");
+  const [existingTopicsSnap, existingInstructorsSnap] = await Promise.all([
+    getDocs(collection(db, "topics")),
+    getDocs(collection(db, "instructors")),
+  ]);
+  const existingTopicIds = new Set(existingTopicsSnap.docs.map((d) => d.id));
+  const existingByName = new Map(
+    existingInstructorsSnap.docs.map((d) => [normalizeNameKey(d.data().name), { instructorId: d.id, name: d.data().name, email: d.data().email || "" }])
+  );
+
+  onProgress("Matching instructor names...");
+  const newTopicsByKey = new Map();
+  const newInstructorsByKey = new Map(); // only people not already in existingByName
+  const droppedRawTexts = new Set();
+  let skippedExisting = 0;
+  let skippedInvalid = 0;
+
+  function ensureInstructor(identity) {
+    if (identity.instructorId) return identity; // already exists in Firestore
+    const key = normalizeNameKey(identity.name);
+    if (newInstructorsByKey.has(key)) return newInstructorsByKey.get(key);
+    const record = { instructorId: `p-${slugify(identity.name)}`, name: identity.name, email: "", accessType: "guest", active: true };
+    newInstructorsByKey.set(key, record);
+    return record;
+  }
+
+  for (const row of rows) {
+    if (!isRealLabRow(row)) { skippedInvalid++; continue; }
+
+    const year = yearLabel(row.Year);
+    const course = String(row.Course).trim();
+    const topicName = String(row.Topic).trim();
+    const dedupeKey = `${year}-${course}-${slugify(topicName)}`;
+
+    if (existingTopicIds.has(dedupeKey)) { skippedExisting++; continue; }
+
+    let topic = newTopicsByKey.get(dedupeKey);
+    if (!topic) {
+      topic = {
+        topicId: dedupeKey, academicYear: year, course, topicName,
+        primaryInstructorNames: [], secondaryInstructorNames: [], finalizedInstructorNames: [],
+        assignedInstructorIDs: [], instructorRoles: {},
+        outcomes: [], completionStatus: "not_started", activityHistory: [],
+      };
+      newTopicsByKey.set(dedupeKey, topic);
+    }
+
+    const assignedInstructorIDs = new Set(topic.assignedInstructorIDs);
+    const roles = topic.instructorRoles;
+
+    function resolveField(names, role, targetArray) {
+      for (const rawText of names) {
+        const identities = resolveLabInstructor(rawText, existingByName);
+        if (identities.length === 0) { droppedRawTexts.add(rawText); continue; }
+        for (const raw of identities) {
+          const rec = raw.instructorId ? raw : ensureInstructor(raw);
+          assignedInstructorIDs.add(rec.instructorId);
+          roles[rec.instructorId] = roles[rec.instructorId] || [];
+          if (!roles[rec.instructorId].includes(role)) roles[rec.instructorId].push(role);
+          if (!targetArray.includes(rec.name)) targetArray.push(rec.name);
+        }
+      }
+    }
+
+    resolveField(splitNames(row["Primary Instructor"]), "primary", topic.primaryInstructorNames);
+    resolveField(splitNames(row["Secondary Instructor"]), "secondary", topic.secondaryInstructorNames);
+    resolveField(splitNames(row["Finalized Instructors"]), "finalized", topic.finalizedInstructorNames);
+
+    topic.assignedInstructorIDs = Array.from(assignedInstructorIDs);
+  }
+
+  const newTopics = Array.from(newTopicsByKey.values());
+  const newInstructors = Array.from(newInstructorsByKey.values());
+
+  onProgress(`Uploading ${newInstructors.length} new instructor(s)...`);
+  await uploadInBatches("instructors", newInstructors, "instructorId", (done, total) => onProgress(`Instructors: ${done}/${total}`));
+
+  onProgress(`Uploading ${newTopics.length} new lab session(s)...`);
+  await uploadInBatches("topics", newTopics, "topicId", (done, total) => onProgress(`Sessions: ${done}/${total}`));
+
+  return {
+    newSessionsAdded: newTopics.length,
+    skippedAlreadyExists: skippedExisting,
+    skippedInvalidRows: skippedInvalid,
+    newInstructorsAdded: newInstructors.length,
+    droppedRawTexts: Array.from(droppedRawTexts),
+    newTopicIds: newTopics.map((t) => t.topicId),
+    newInstructorIds: newInstructors.map((i) => i.instructorId),
   };
 }
