@@ -29,6 +29,18 @@
       <p class="text-muted mt-2" id="import-status"></p>
     </div>
 
+    <div class="card mb-4" id="import-labs-section">
+      <h3 class="section-heading"><span class="icon">🧪</span> Import LAB sessions only</h3>
+      <p class="text-muted">Separate file, separate flow — for the lab timetable file (its own "Timetable" sheet layout). <strong>Safe with the system already in use:</strong> if a session already exists, that row is skipped entirely — never merged, never overwritten. Only genuinely new lab sessions get added.</p>
+      <div class="form-group mt-2">
+        <label for="file-labs">Lab timetable file (.xlsx)</label>
+        <input type="file" id="file-labs" accept=".xlsx" />
+      </div>
+      <button class="btn btn-primary" id="btn-import-labs">Import new lab sessions</button>
+      <p class="text-muted mt-2" id="import-labs-status"></p>
+      <div id="import-labs-dropped" class="mt-2" style="display:none;"></div>
+    </div>
+
     <div class="card mb-4" id="recalc-section">
       <h3 class="section-heading"><span class="icon">🔄</span> Recalculate completion status</h3>
       <p class="text-muted">Run this once after changing the completion threshold in the code. It checks every existing session against the current rule and updates its status — nothing is added, removed, or changed about the outcomes themselves, only the "Complete/In progress" label.</p>
@@ -132,8 +144,9 @@
       getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible,
       getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV, assignInstructorToTeam,
       computeBalancedTeamAssignment, applyTeamAssignment, countUntaggedOutcomes, recalculateAllCompletionStatuses, resolveTopicSlot, renameSession,
+      markSessionComplete, unmarkSessionComplete,
     } from "./dataEngine.js";
-    import { importNow } from "./importEngine.js";
+    import { importNow, importLabsOnly } from "./importEngine.js";
 
     const $ = (id) => document.getElementById(id);
 
@@ -176,6 +189,52 @@
         $("import-status").textContent = "Error: " + err.message;
       } finally {
         $("btn-import").disabled = false;
+      }
+    });
+
+    $("btn-import-labs").addEventListener("click", async () => {
+      const labFile = $("file-labs").files[0];
+      if (!labFile) {
+        $("import-labs-status").textContent = "Select the lab file first.";
+        return;
+      }
+      const ok = window.confirm(
+        "This uploads only genuinely NEW lab sessions — anything that already exists is skipped, never touched. " +
+        "Note: session totals for everyone (instructors, teams, overall %) will go up once new labs are added. Continue?"
+      );
+      if (!ok) return;
+
+      $("btn-import-labs").disabled = true;
+      try {
+        const result = await importLabsOnly(labFile, (msg) => {
+          $("import-labs-status").textContent = msg;
+        });
+        $("import-labs-status").textContent =
+          `Done: ${result.newSessionsAdded} new lab session(s) added, ${result.skippedAlreadyExists} skipped (already existed — untouched), ` +
+          `${result.skippedInvalidRows} rows excluded (holidays/no course/etc.), ${result.newInstructorsAdded} new instructor(s) added.`;
+
+        if (result.droppedRawTexts.length > 0) {
+          $("import-labs-dropped").style.display = "block";
+          $("import-labs-dropped").innerHTML =
+            `<p class="text-muted">Names that couldn't be identified (nobody assigned for these):</p>` +
+            `<ul style="margin:6px 0 0 18px; padding:0;">${result.droppedRawTexts.map((t) => `<li>"${t}"</li>`).join("")}</ul>`;
+        } else {
+          $("import-labs-dropped").style.display = "none";
+        }
+
+        allTopics = await getAllTopics();
+        allInstructors = await getAllInstructors();
+        renderStats();
+        renderInstructorProgress();
+        renderCourseProgress();
+        renderTeamProgress();
+        renderAssignTeamList();
+        populateFilterOptions();
+        refreshPreview();
+      } catch (err) {
+        $("import-labs-status").textContent = "Error: " + err.message;
+      } finally {
+        $("btn-import-labs").disabled = false;
       }
     });
 
@@ -404,9 +463,15 @@
           <div style="padding:12px;">
             <div class="flex-between" style="align-items:center; flex-wrap:wrap; gap:8px;">
               <strong>${t.academicYear} · Course ${t.course} · ${t.topicName}</strong>
-              <button class="btn btn-secondary rename-btn" data-topic="${t.id}" data-current-name="${t.topicName}" style="font-size:0.8rem; padding:4px 12px;">✏️ Rename</button>
+              <span class="flex gap-2" style="align-items:center;">
+                <span class="badge badge-${t.completionStatus.replace("_", "-")}">${t.completionStatus.replace("_", " ")}</span>
+                ${t.completionStatus === "complete"
+                  ? `<button class="btn btn-secondary uncomplete-btn" data-topic="${t.id}" style="font-size:0.8rem; padding:4px 12px;">↩ Unmark Complete</button>`
+                  : `<button class="btn btn-secondary complete-btn" data-topic="${t.id}" style="font-size:0.8rem; padding:4px 12px;">✓ Mark Complete</button>`}
+                <button class="btn btn-secondary rename-btn" data-topic="${t.id}" data-current-name="${t.topicName}" style="font-size:0.8rem; padding:4px 12px;">✏️ Rename</button>
+              </span>
             </div>
-            <div class="text-muted" style="font-size:0.8rem; margin-top:2px;">${(t.outcomes || []).length} outcome(s) already on this session — these are never touched by a swap or rename.</div>
+            <div class="text-muted" style="font-size:0.8rem; margin-top:2px;">${(t.outcomes || []).length} outcome(s) already on this session — these are never touched by a swap, rename, or completion mark.</div>
             ${currentInstructors
               .map(
                 (instr) => `
@@ -480,6 +545,54 @@
             alert("Error: " + err.message);
             btn.disabled = false;
             btn.textContent = "✏️ Rename";
+          }
+        });
+      });
+
+      container.querySelectorAll(".complete-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const topicId = btn.dataset.topic;
+          const ok = window.confirm("Mark this session as Complete? Use this once the instructor has confirmed they're done, regardless of outcome count.");
+          if (!ok) return;
+
+          btn.disabled = true;
+          btn.textContent = "Saving...";
+          try {
+            await markSessionComplete(topicId);
+            allTopics = await getAllTopics();
+            renderReassignResults($("reassign-search").value.trim());
+            renderStats();
+            renderInstructorProgress();
+            renderCourseProgress();
+            renderTeamProgress();
+          } catch (err) {
+            alert("Error: " + err.message);
+            btn.disabled = false;
+            btn.textContent = "✓ Mark Complete";
+          }
+        });
+      });
+
+      container.querySelectorAll(".uncomplete-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const topicId = btn.dataset.topic;
+          const ok = window.confirm("Unmark this session as Complete? It will go back to reflecting the automatic rule based on outcome count.");
+          if (!ok) return;
+
+          btn.disabled = true;
+          btn.textContent = "Saving...";
+          try {
+            await unmarkSessionComplete(topicId);
+            allTopics = await getAllTopics();
+            renderReassignResults($("reassign-search").value.trim());
+            renderStats();
+            renderInstructorProgress();
+            renderCourseProgress();
+            renderTeamProgress();
+          } catch (err) {
+            alert("Error: " + err.message);
+            btn.disabled = false;
+            btn.textContent = "↩ Unmark Complete";
           }
         });
       });
