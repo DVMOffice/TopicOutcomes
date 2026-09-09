@@ -28,7 +28,7 @@ import {
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-const MIN_OUTCOMES = 4; // used only to gauge progress %, not enforced as a hard limit
+const MIN_OUTCOMES = 6; // used only to gauge progress %, not enforced as a hard limit
 
 function computeStatus(outcomes) {
   if (!outcomes || outcomes.length === 0) return "not_started";
@@ -391,6 +391,21 @@ export async function renameSession(topicId, newName) {
   const trimmed = (newName || "").trim();
   if (!trimmed) throw new Error("Name can't be empty.");
   await updateDoc(doc(db, "topics", topicId), { topicName: trimmed });
+}
+
+/**
+ * Manually marks/unmarks a session as Complete — for cases where an
+ * instructor confirms they're done regardless of outcome count. Only
+ * touches completionStatus; never touches outcomes, instructors, or
+ * activity history. Note: if the outcomes list is edited again later
+ * (add/edit/delete), the normal automatic rule (outcomes.length vs.
+ * MIN_OUTCOMES) recalculates and can override this manual mark.
+ */
+export async function markSessionComplete(topicId) {
+  await updateDoc(doc(db, "topics", topicId), { completionStatus: "complete" });
+}
+export async function unmarkSessionComplete(topicId) {
+  await updateDoc(doc(db, "topics", topicId), { completionStatus: "in_progress" });
 }
 
 export async function resolveTopicSlot(topicId, oldInstructorId, oldRawName, newInstructors) {
