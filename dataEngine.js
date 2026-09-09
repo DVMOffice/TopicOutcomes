@@ -28,7 +28,7 @@ import {
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-const MIN_OUTCOMES = 6; // used only to gauge progress %, not enforced as a hard limit
+const MIN_OUTCOMES = 4; // used only to gauge progress %, not enforced as a hard limit
 
 function computeStatus(outcomes) {
   if (!outcomes || outcomes.length === 0) return "not_started";
