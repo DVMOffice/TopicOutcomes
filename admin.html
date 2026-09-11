@@ -55,6 +55,36 @@
       <div id="reassign-results" style="max-height:400px; overflow-y:auto;"></div>
     </div>
 
+    <div class="card mb-4" id="new-session-section">
+      <h3 class="section-heading"><span class="icon">➕</span> Create a new session</h3>
+      <p class="text-muted">For a session that doesn't exist anywhere yet. Refuses to run if a matching year+course+name already exists, so it can never overwrite something real. Instructor names are matched to existing people when possible; anyone not found is added as new (no email, no team — assign a team after).</p>
+      <div class="flex gap-2 mt-2" style="flex-wrap:wrap;">
+        <div class="form-group" style="flex:1; min-width:120px;">
+          <label for="ns-year">Academic Year</label>
+          <select id="ns-year">
+            <option value="Year 1">Year 1</option>
+            <option value="Year 2">Year 2</option>
+            <option value="Year 3">Year 3</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:1; min-width:100px;">
+          <label for="ns-course">Course</label>
+          <input type="text" id="ns-course" placeholder="e.g. 206" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="ns-topic">Session name</label>
+        <input type="text" id="ns-topic" placeholder="e.g. Intro to Radiology" />
+      </div>
+      <div class="form-group">
+        <label for="ns-instructors">Instructor name(s)</label>
+        <input type="text" id="ns-instructors" placeholder="e.g. Renate Weller, Jane Doe" />
+        <p class="text-muted mt-1" style="font-size:0.8rem;">Separate multiple names with a comma. Existing people are matched by exact name; anyone new gets created automatically.</p>
+      </div>
+      <button class="btn btn-primary" id="btn-create-session">+ Create session</button>
+      <p class="text-muted mt-2" id="new-session-status"></p>
+    </div>
+
     <div class="card mb-4">
       <h2 id="overall-title">Overall progress</h2>
       <div class="progress-track"><div class="progress-fill" id="overall-fill" style="width:0%"></div></div>
@@ -143,7 +173,7 @@
     import {
       getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible,
       getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV, assignInstructorToTeam,
-      computeBalancedTeamAssignment, applyTeamAssignment, countUntaggedOutcomes, recalculateAllCompletionStatuses, resolveTopicSlot, renameSession,
+      computeBalancedTeamAssignment, applyTeamAssignment, countUntaggedOutcomes, recalculateAllCompletionStatuses, resolveTopicSlot, renameSession, addInstructorToTopic, createNewSession,
       markSessionComplete, unmarkSessionComplete,
     } from "./dataEngine.js";
     import { importNow, importLabsOnly } from "./importEngine.js";
@@ -428,6 +458,49 @@
 
     $("reassign-search").addEventListener("input", (e) => renderReassignResults(e.target.value.trim()));
 
+    $("btn-create-session").addEventListener("click", async () => {
+      const academicYear = $("ns-year").value;
+      const course = $("ns-course").value.trim();
+      const topicName = $("ns-topic").value.trim();
+      const instructorNames = $("ns-instructors").value.trim();
+
+      if (!course || !topicName || !instructorNames) {
+        $("new-session-status").textContent = "Course, session name, and at least one instructor are all required.";
+        return;
+      }
+
+      const ok = window.confirm(`Create "${topicName}" (${academicYear}, Course ${course})? This will only run if a session with this exact year+course+name doesn't already exist.`);
+      if (!ok) return;
+
+      $("btn-create-session").disabled = true;
+      $("new-session-status").textContent = "Creating...";
+      try {
+        const result = await createNewSession({ academicYear, course, topicName, instructorNames }, allInstructors);
+        $("new-session-status").textContent =
+          `Done — session created.` +
+          (result.newlyCreatedInstructors.length > 0
+            ? ` New instructor(s) added (no team yet, assign one below): ${result.newlyCreatedInstructors.join(", ")}.`
+            : "");
+        $("ns-course").value = "";
+        $("ns-topic").value = "";
+        $("ns-instructors").value = "";
+
+        allTopics = await getAllTopics();
+        allInstructors = await getAllInstructors();
+        renderStats();
+        renderInstructorProgress();
+        renderCourseProgress();
+        renderTeamProgress();
+        renderAssignTeamList();
+        populateFilterOptions();
+        refreshPreview();
+      } catch (err) {
+        $("new-session-status").textContent = "Error: " + err.message;
+      } finally {
+        $("btn-create-session").disabled = false;
+      }
+    });
+
     function renderReassignResults(term) {
       const container = $("reassign-results");
       if (!term || term.length < 2) {
@@ -487,6 +560,14 @@
             `
               )
               .join("")}
+            <div class="flex gap-2 mt-2" style="align-items:center; flex-wrap:wrap; border-top:1px dashed var(--color-border); padding-top:10px;">
+              <span class="text-muted" style="font-size:0.85rem; min-width:160px;">+ Add someone (keeps everyone else)</span>
+              <select class="add-instructor-select" data-topic="${t.id}" style="min-width:200px;">
+                <option value="">Choose instructor...</option>
+                ${allInstructorOptions}
+              </select>
+              <button class="btn btn-secondary add-instructor-btn" data-topic="${t.id}" style="font-size:0.85rem; padding:6px 14px;">+ Add</button>
+            </div>
           </div>
         </div>
       `;
@@ -522,6 +603,37 @@
             alert("Error: " + err.message);
             btn.disabled = false;
             btn.textContent = "Swap";
+          }
+        });
+      });
+
+      container.querySelectorAll(".add-instructor-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const topicId = btn.dataset.topic;
+          const select = container.querySelector(`.add-instructor-select[data-topic="${topicId}"]`);
+          const newId = select.value;
+          const newName = select.selectedOptions[0]?.dataset.name;
+
+          if (!newId) {
+            alert("Choose an instructor first.");
+            return;
+          }
+          const ok = window.confirm(`Add "${newName}" to this session? Everyone already assigned stays exactly as they are.`);
+          if (!ok) return;
+
+          btn.disabled = true;
+          btn.textContent = "Saving...";
+          try {
+            await addInstructorToTopic(topicId, newId, newName, "finalized");
+            allTopics = await getAllTopics();
+            renderReassignResults($("reassign-search").value.trim());
+            renderInstructorProgress();
+            renderCourseProgress();
+            renderTeamProgress();
+          } catch (err) {
+            alert("Error: " + err.message);
+            btn.disabled = false;
+            btn.textContent = "+ Add";
           }
         });
       });
