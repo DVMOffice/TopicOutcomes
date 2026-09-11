@@ -25,6 +25,7 @@ import {
   writeBatch,
   deleteDoc,
   updateDoc,
+  setDoc,
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -406,6 +407,100 @@ export async function markSessionComplete(topicId) {
 }
 export async function unmarkSessionComplete(topicId) {
   await updateDoc(doc(db, "topics", topicId), { completionStatus: "in_progress" });
+}
+
+/**
+ * Adds ONE instructor to a session as an additional collaborator —
+ * does not remove or replace anyone already there. Uses a
+ * transaction so it's safe even if someone else changes the same
+ * session at the same time. Never touches outcomes.
+ */
+function slugify(str) {
+  return String(str).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 60);
+}
+
+/**
+ * Creates a brand-new session from scratch (one that doesn't exist
+ * anywhere in the system yet). Refuses to run if a session with the
+ * same year+course+name already exists — use "Add someone" or
+ * "Reassign" instead for anything that already exists, so this can
+ * never accidentally overwrite existing outcomes.
+ *
+ * For each instructor name: matches an existing instructor by exact
+ * name if one exists; otherwise creates a brand-new instructor
+ * (no email, no team — assign a team afterward if needed).
+ */
+export async function createNewSession({ academicYear, course, topicName, instructorNames }, allInstructors) {
+  const year = academicYear.trim();
+  const courseTrimmed = String(course).trim();
+  const topicTrimmed = topicName.trim();
+  if (!year || !courseTrimmed || !topicTrimmed) throw new Error("Year, course, and session name are all required.");
+
+  const topicId = `${year}-${courseTrimmed}-${slugify(topicTrimmed)}`;
+  const existingSnap = await getDoc(doc(db, "topics", topicId));
+  if (existingSnap.exists()) {
+    throw new Error(`A session with this year, course, and name already exists. Use "Add someone" or "Reassign" on that existing session instead.`);
+  }
+
+  const existingByName = new Map(allInstructors.map((i) => [i.name.toLowerCase().trim(), i]));
+  const assignedInstructorIDs = [];
+  const instructorRoles = {};
+  const finalizedInstructorNames = [];
+  const newlyCreatedInstructors = [];
+
+  const names = instructorNames
+    .split(",")
+    .map((n) => n.trim())
+    .filter(Boolean);
+
+  for (const name of names) {
+    let record = existingByName.get(name.toLowerCase());
+    if (!record) {
+      const instructorId = `p-${slugify(name)}`;
+      record = { instructorId, name, email: "", accessType: "guest", active: true };
+      await setDoc(doc(db, "instructors", instructorId), record, { merge: true });
+      newlyCreatedInstructors.push(name);
+    }
+    assignedInstructorIDs.push(record.instructorId);
+    instructorRoles[record.instructorId] = ["finalized"];
+    finalizedInstructorNames.push(record.name);
+  }
+
+  const topic = {
+    topicId, academicYear: year, course: courseTrimmed, topicName: topicTrimmed,
+    primaryInstructorNames: [], secondaryInstructorNames: [], finalizedInstructorNames,
+    assignedInstructorIDs, instructorRoles,
+    outcomes: [], completionStatus: "not_started", activityHistory: [],
+  };
+  await setDoc(doc(db, "topics", topicId), topic);
+
+  return { topicId, newlyCreatedInstructors };
+}
+
+export async function addInstructorToTopic(topicId, instructorId, instructorName, role = "finalized") {
+  const ref = doc(db, "topics", topicId);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error("Session not found");
+    const data = snap.data();
+
+    const ids = new Set(data.assignedInstructorIDs || []);
+    ids.add(instructorId);
+
+    const roles = { ...(data.instructorRoles || {}) };
+    roles[instructorId] = Array.from(new Set([...(roles[instructorId] || []), role]));
+
+    const nameField =
+      role === "primary" ? "primaryInstructorNames" : role === "secondary" ? "secondaryInstructorNames" : "finalizedInstructorNames";
+    const names = [...(data[nameField] || [])];
+    if (!names.includes(instructorName)) names.push(instructorName);
+
+    tx.update(ref, {
+      assignedInstructorIDs: Array.from(ids),
+      instructorRoles: roles,
+      [nameField]: names,
+    });
+  });
 }
 
 export async function resolveTopicSlot(topicId, oldInstructorId, oldRawName, newInstructors) {
