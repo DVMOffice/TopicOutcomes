@@ -173,7 +173,7 @@
     import {
       getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible,
       getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV, assignInstructorToTeam,
-      computeBalancedTeamAssignment, applyTeamAssignment, countUntaggedOutcomes, recalculateAllCompletionStatuses, resolveTopicSlot, renameSession, addInstructorToTopic, createNewSession,
+      computeBalancedTeamAssignment, applyTeamAssignment, countUntaggedOutcomes, recalculateAllCompletionStatuses, resolveTopicSlot, renameSession, addInstructorToTopic, createNewSession, removeInstructorFromTopic,
       markSessionComplete, unmarkSessionComplete,
     } from "./dataEngine.js";
     import { importNow, importLabsOnly } from "./importEngine.js";
@@ -556,6 +556,7 @@
                   ${allInstructorOptions}
                 </select>
                 <button class="btn btn-secondary reassign-btn" data-topic="${t.id}" data-old-id="${instr.instructorId}" data-old-name="${instr.name}" style="font-size:0.85rem; padding:6px 14px;">Swap</button>
+                <button class="btn btn-danger remove-instructor-btn" data-topic="${t.id}" data-old-id="${instr.instructorId}" data-old-name="${instr.name}" style="font-size:0.85rem; padding:6px 14px;">🗑 Remove</button>
               </div>
             `
               )
@@ -603,6 +604,31 @@
             alert("Error: " + err.message);
             btn.disabled = false;
             btn.textContent = "Swap";
+          }
+        });
+      });
+
+      container.querySelectorAll(".remove-instructor-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const topicId = btn.dataset.topic;
+          const oldId = btn.dataset.oldId;
+          const oldName = btn.dataset.oldName;
+          const ok = window.confirm(`Remove "${oldName}" from this session? This does not touch any outcomes — it only changes who's assigned.`);
+          if (!ok) return;
+
+          btn.disabled = true;
+          btn.textContent = "Removing...";
+          try {
+            await removeInstructorFromTopic(topicId, oldId, oldName);
+            allTopics = await getAllTopics();
+            renderReassignResults($("reassign-search").value.trim());
+            renderInstructorProgress();
+            renderCourseProgress();
+            renderTeamProgress();
+          } catch (err) {
+            alert("Error: " + err.message);
+            btn.disabled = false;
+            btn.textContent = "🗑 Remove";
           }
         });
       });
