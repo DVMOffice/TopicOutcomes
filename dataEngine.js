@@ -29,7 +29,7 @@ import {
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-const MIN_OUTCOMES = 3; // used only to gauge progress %, not enforced as a hard limit
+const MIN_OUTCOMES = 4; // used only to gauge progress %, not enforced as a hard limit
 
 function computeStatus(outcomes) {
   if (!outcomes || outcomes.length === 0) return "not_started";
@@ -475,6 +475,37 @@ export async function createNewSession({ academicYear, course, topicName, instru
   await setDoc(doc(db, "topics", topicId), topic);
 
   return { topicId, newlyCreatedInstructors };
+}
+
+/**
+ * Removes ONE instructor from a session — no replacement. Refuses to
+ * remove the last remaining instructor (a session should always have
+ * at least one collaborator; use "No Instructor Needed" as a
+ * placeholder if that's genuinely the situation). Never touches
+ * outcomes, status, or activity history.
+ */
+export async function removeInstructorFromTopic(topicId, instructorId, instructorName) {
+  const ref = doc(db, "topics", topicId);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error("Session not found");
+    const data = snap.data();
+
+    const ids = new Set(data.assignedInstructorIDs || []);
+    if (ids.size <= 1) throw new Error("Can't remove the last instructor on a session — swap them instead, or add someone else first.");
+    ids.delete(instructorId);
+
+    const roles = { ...(data.instructorRoles || {}) };
+    delete roles[instructorId];
+
+    tx.update(ref, {
+      assignedInstructorIDs: Array.from(ids),
+      instructorRoles: roles,
+      primaryInstructorNames: replaceInArray(data.primaryInstructorNames, instructorName, []),
+      secondaryInstructorNames: replaceInArray(data.secondaryInstructorNames, instructorName, []),
+      finalizedInstructorNames: replaceInArray(data.finalizedInstructorNames, instructorName, []),
+    });
+  });
 }
 
 export async function addInstructorToTopic(topicId, instructorId, instructorName, role = "finalized") {
