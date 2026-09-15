@@ -102,13 +102,19 @@
 
     <div class="two-col-grid mb-4">
       <div class="card">
-        <h3 class="section-heading"><span class="icon">📊</span> Progress by instructor</h3>
+        <div class="flex-between" style="align-items:center;">
+          <h3 class="section-heading" style="margin:0;"><span class="icon">📊</span> Progress by instructor</h3>
+          <button class="btn btn-secondary" id="btn-download-instructor-report" style="font-size:0.8rem; padding:5px 12px;">⬇ Download</button>
+        </div>
         <input type="search" id="instructor-progress-search" placeholder="🔍 Search instructor name..." class="mt-2 mb-2" />
         <div id="instructor-progress" style="max-height:340px; overflow-y:auto;"></div>
       </div>
 
       <div class="card">
-        <h3 class="section-heading"><span class="icon">🏫</span> Progress by course</h3>
+        <div class="flex-between" style="align-items:center;">
+          <h3 class="section-heading" style="margin:0;"><span class="icon">🏫</span> Progress by course</h3>
+          <button class="btn btn-secondary" id="btn-download-course-report" style="font-size:0.8rem; padding:5px 12px;">⬇ Download</button>
+        </div>
         <p class="text-muted mt-1" style="font-size:0.85rem;">For your weekly report — how many sessions and outcomes exist per course.</p>
         <div id="course-progress" class="mt-2" style="max-height:340px; overflow-y:auto;"></div>
       </div>
@@ -171,7 +177,7 @@
   <script type="module">
     import { getAllInstructors, onAuthChange, isCurrentUserAdmin, TEAM_IDS, logOut } from "./app.js";
     import {
-      getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible,
+      getAllTopics, applyFilters, flattenToRows, downloadCSV, downloadJSON, downloadExcelCompatible, downloadStyledReport,
       getTeamProgress, buildTeamRosterRows, downloadRowsAsCSV, assignInstructorToTeam,
       computeBalancedTeamAssignment, applyTeamAssignment, countUntaggedOutcomes, recalculateAllCompletionStatuses, resolveTopicSlot, renameSession, addInstructorToTopic, createNewSession, removeInstructorFromTopic,
       markSessionComplete, unmarkSessionComplete,
@@ -329,6 +335,42 @@
       renderInstructorProgressList(filtered);
     });
 
+    $("btn-download-instructor-report").addEventListener("click", () => {
+      const rows = instructorProgressRows.map((r) => ({
+        "Instructor": r.name,
+        "Sessions Completed": r.complete,
+        "Total Sessions": r.total,
+        "% Complete": `${r.pct}%`,
+        "Outcomes Written": r.outcomeCount,
+        "Missing Species/Organ System": r.untagged || 0,
+      }));
+      downloadStyledReport(
+        "Progress by Instructor",
+        ["Instructor", "Sessions Completed", "Total Sessions", "% Complete", "Outcomes Written", "Missing Species/Organ System"],
+        rows,
+        `progress-by-instructor-${new Date().toISOString().slice(0, 10)}.xls`
+      );
+    });
+
+    $("btn-download-course-report").addEventListener("click", () => {
+      const rows = courseProgressRows.map((r) => ({
+        "Course": r.label,
+        "Sessions Completed": r.complete,
+        "Total Sessions": r.total,
+        "% Complete": `${r.pct}%`,
+        "Outcomes Written": r.outcomeCount,
+        "Missing Species/Organ System": r.untagged || 0,
+      }));
+      downloadStyledReport(
+        "Progress by Course",
+        ["Course", "Sessions Completed", "Total Sessions", "% Complete", "Outcomes Written", "Missing Species/Organ System"],
+        rows,
+        `progress-by-course-${new Date().toISOString().slice(0, 10)}.xls`
+      );
+    });
+
+    let courseProgressRows = [];
+
     function renderCourseProgress() {
       const byCourse = new Map(); // "Year 1 · Course 206" -> topics[]
       for (const t of allTopics) {
@@ -346,6 +388,7 @@
           return { label, complete, total: topics.length, pct, outcomeCount, untagged };
         })
         .sort((a, b) => a.label.localeCompare(b.label));
+      courseProgressRows = rows;
 
       $("course-progress").innerHTML = rows
         .map(
