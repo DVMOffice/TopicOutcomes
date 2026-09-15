@@ -339,6 +339,36 @@ export function downloadExcelCompatible(rows, filename = "learning-outcomes.xls"
   downloadBlob(`<table>${header}${body}</table>`, filename, "application/vnd.ms-excel");
 }
 
+/**
+ * Read-only visual report export — for a quick-glance summary view
+ * (like "Progress by instructor"), not the flat per-outcome export
+ * used for Power Query/Cblue. Takes whatever's already on screen and
+ * turns it into a nicely formatted spreadsheet — doesn't touch
+ * Firestore at all, purely reads from data already in memory.
+ */
+export function downloadStyledReport(title, columns, rows, filename = "report.xls") {
+  const headerCells = columns.map((c) => `<th style="background:#1c3f6e; color:#ffffff; padding:8px 12px; text-align:left; font-family:Arial, sans-serif; font-size:12px; border:1px solid #16305a;">${c}</th>`).join("");
+  const bodyRows = rows
+    .map((r, i) => {
+      const bg = i % 2 === 0 ? "#ffffff" : "#f6f8fb";
+      const cells = columns
+        .map((c) => `<td style="background:${bg}; padding:7px 12px; font-family:Arial, sans-serif; font-size:12px; color:#3a4657; border:1px solid #e1e6ee;">${r[c] ?? ""}</td>`)
+        .join("");
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+  const titleRow = `<tr><td colspan="${columns.length}" style="background:#142c4d; color:#ffffff; padding:12px; font-family:Arial, sans-serif; font-size:15px; font-weight:bold; border:1px solid #16305a;">${title}</td></tr>`;
+
+  const html = `
+    <table style="border-collapse:collapse;">
+      ${titleRow}
+      <tr>${headerCells}</tr>
+      ${bodyRows}
+    </table>
+  `;
+  downloadBlob(html, filename, "application/vnd.ms-excel");
+}
+
 // ================================================================
 // REVIEW TOPICS ONE AT A TIME (fix placeholder instructors)
 // ================================================================
